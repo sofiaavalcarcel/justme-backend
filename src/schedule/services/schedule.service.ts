@@ -19,7 +19,9 @@ export class ScheduleService {
         @Inject(forwardRef(() => ProfessionalsService))
         private professionalsService: ProfessionalsService,
         private servicesService: ServicesService,
-    ) {}
+    ) {
+        console.log('hola mundo');
+    }
 
     async getSchedule(professionalId: number) {
         return this.scheduleRepo.find({
@@ -75,10 +77,10 @@ export class ScheduleService {
     }
 
     async getAvailableSlots(
-        professionalId: number, 
-        date: string, 
-        serviceId?: number, 
-        latitude?: number, 
+        professionalId: number,
+        date: string,
+        serviceId?: number,
+        latitude?: number,
         longitude?: number,
         serviceDuration: number = 60
     ) {
@@ -104,7 +106,7 @@ export class ScheduleService {
         if (!schedule) return { date, slots: [] };
 
         // Determine dynamic duration
-        let duration = serviceDuration; 
+        let duration = serviceDuration;
         let bufferTime = 15; // Default: 15 mins
 
         const professional = await this.professionalsService.findOne(professionalId);
@@ -162,12 +164,12 @@ export class ScheduleService {
             // Use server time or professional's timezone if applicable. For now, server local.
             const advanceNoticeHours = professional.advanceNotice !== undefined ? Number(professional.advanceNotice) : 2;
             const minTime = new Date(now.getTime() + advanceNoticeHours * 60 * 60 * 1000);
-            
+
             // If the calculated minTime is already on a different day, no slots available today
             if (minTime.toISOString().split('T')[0] !== todayStr) {
                 return { date, slots: [] };
             }
-            
+
             minTimeInMinutes = minTime.getHours() * 60 + minTime.getMinutes();
         }
 
@@ -223,7 +225,7 @@ export class ScheduleService {
                 current += step;
                 continue;
             }
-            
+
             const slotEnd = current + serviceDuration;
             const timeStr = this.minutesToTime(current);
 
@@ -244,7 +246,7 @@ export class ScheduleService {
 
             // Check exceptions
             const isExcepted = exceptions.some(
-                (e) => 
+                (e) =>
                     !e.isFullDay && e.startTime && e.endTime &&
                     current < this.timeToMinutes(e.endTime) &&
                     slotEnd > this.timeToMinutes(e.startTime)

@@ -25,11 +25,11 @@ export class AdminService {
             this.serviceRepo.count({ where: { isActive: true } }),
         ]);
 
-        // Revenue calculation
+        // Revenue calculation — only completed transactions
         const revenueResult = await this.transactionRepo
             .createQueryBuilder('t')
-            .select('SUM(CASE WHEN t.type = \'payment\' THEN t.amount ELSE 0 END)', 'totalRevenue')
-            .addSelect('SUM(CASE WHEN t.type = \'commission\' THEN ABS(t.amount) ELSE 0 END)', 'commissionsCollected')
+            .select('SUM(CASE WHEN t.type = \'payment\' AND t.status = \'completed\' THEN t.amount ELSE 0 END)', 'totalRevenue')
+            .addSelect('SUM(CASE WHEN t.type = \'commission\' AND t.status = \'completed\' THEN ABS(t.amount) ELSE 0 END)', 'commissionsCollected')
             .getRawOne();
 
         // Average rating
@@ -161,69 +161,84 @@ export class AdminService {
         const skip = (page - 1) * limit;
         const { type, startDate, endDate } = filters;
 
-        const dateFilter = (qb: any, tableAlias: string) => {
-            if (startDate) qb.andWhere(`${tableAlias}.createdAt >= :startDate`, { startDate });
-            if (endDate) qb.andWhere(`${tableAlias}.createdAt <= :endDate`, { endDate });
-        };
+        const includeUsers    = !type || type === 'registration';
+        const includeBookings = !type || type === 'booking';
 
-        const fetchUsers = async () => {
-            if (type && type !== 'registration') return [[], 0];
-            const qb = this.userRepo.createQueryBuilder('u').orderBy('u.createdAt', 'DESC');
-            dateFilter(qb, 'u');
-            return qb.getManyAndCount();
-        };
+        // Positional params array: [startDate?, endDate?, limit, skip]
+        const params: any[] = [];
+        let startCond = '';
+        let endCond   = '';
 
-        const fetchBookings = async () => {
-            if (type && type !== 'booking') return [[], 0];
-            const qb = this.bookingRepo.createQueryBuilder('b')
-                .leftJoinAndSelect('b.user', 'user')
-                .leftJoinAndSelect('b.professionalService', 'ps')
-                .leftJoinAndSelect('ps.service', 'svc')
-                .orderBy('b.createdAt', 'DESC');
-            dateFilter(qb, 'b');
-            return qb.getManyAndCount();
-        };
+        if (startDate) { params.push(startDate); startCond = `AND "createdAt" >= $${params.length}`; }
+        if (endDate)   { params.push(endDate);   endCond   = `AND "createdAt" <= $${params.length}`; }
 
-        const [userRes, bookingRes] = await Promise.all([
-            fetchUsers(),
-            fetchBookings(),
-        ]);
+        const parts: string[] = [];
 
-        const [users, userCount] = userRes as [any[], number];
-        const [bookings, bookingCount] = bookingRes as [any[], number];
+        if (includeUsers) {
+            parts.push(`
+                SELECT
+                    CONCAT('user-', u.id::text)                                        AS id,
+                    'registration'::text                                               AS type,
+                    u."createdAt"                                                      AS timestamp,
+                    TRIM(CONCAT(u.name, ' ', COALESCE(u."lastName", '')))              AS user_name,
+                    u.avatar                                                           AS user_avatar,
+                    TRIM(CONCAT(u.name, ' ', COALESCE(u."lastName", ''))) || ' se ha unido a JustMe' AS description
+                FROM "user" u
+                WHERE 1=1 ${startCond} ${endCond}
+            `);
+        }
 
-        const mappedUsers = users.map(u => ({
-            id: `user-${u.id}`,
-            type: 'registration',
-            title: 'Nuevo Registro',
-            description: `${u.name} ${u.lastName || ''}`.trim() + ' se ha unido a JustMe',
-            timestamp: u.createdAt,
-            userName: `${u.name} ${u.lastName || ''}`.trim(),
-            userAvatar: u.avatar,
-        }));
+        if (includeBookings) {
+            parts.push(`
+                SELECT
+                    CONCAT('booking-', b.id::text)                                     AS id,
+                    'booking'::text                                                    AS type,
+                    b."createdAt"                                                      AS timestamp,
+                    TRIM(CONCAT(u2.name, ' ', COALESCE(u2."lastName", '')))            AS user_name,
+                    u2.avatar                                                          AS user_avatar,
+                    TRIM(CONCAT(u2.name, ' ha reservado ', COALESCE(svc.name, 'un servicio'))) AS description
+                FROM bookings b
+                LEFT JOIN "user" u2  ON u2.id = b."userId"
+                LEFT JOIN professional_services ps ON ps.id = b."professionalServiceId"
+                LEFT JOIN services svc ON svc.id = ps."serviceId"
+                WHERE 1=1 ${startCond} ${endCond}
+            `);
+        }
 
-        const mappedBookings = bookings.map(b => ({
-            id: `booking-${b.id}`,
-            type: 'booking',
-            title: 'Nueva Reserva',
-            description: `${b.user?.name || 'Un cliente'} ha reservado ${b.professionalService?.service?.name || 'un servicio'}`,
-            timestamp: b.createdAt,
-            userName: `${b.user?.name || ''} ${b.user?.lastName || ''}`.trim(),
-            userAvatar: b.user?.avatar,
-        }));
+        if (parts.length === 0) {
+            return { data: [], total: 0, page, limit, totalPages: 0 };
+        }
 
-        const allActivities = [...mappedUsers, ...mappedBookings]
-            .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        const union = parts.join(' UNION ALL ');
 
-        const total = (userCount as number) + (bookingCount as number);
-        const data = allActivities.slice(skip, skip + limit);
+        const countResult = await this.bookingRepo.query(
+            `SELECT COUNT(*) AS total FROM (${union}) AS combined`,
+            params,
+        );
+        const total = parseInt(countResult[0]?.total) || 0;
+
+        params.push(limit);
+        params.push(skip);
+
+        const data: any[] = await this.bookingRepo.query(
+            `SELECT * FROM (${union}) AS combined ORDER BY timestamp DESC LIMIT $${params.length - 1} OFFSET $${params.length}`,
+            params,
+        );
 
         return {
-            data,
+            data: data.map((r) => ({
+                id:         r.id,
+                type:       r.type,
+                description: r.description,
+                timestamp:  r.timestamp,
+                userName:   (r.user_name ?? '').trim(),
+                userAvatar: r.user_avatar ?? null,
+                title:      r.type === 'registration' ? 'Nuevo Registro' : 'Nueva Reserva',
+            })),
             total,
             page,
             limit,
-            totalPages: Math.ceil(total / limit)
+            totalPages: Math.ceil(total / limit),
         };
     }
 
@@ -235,19 +250,20 @@ export class AdminService {
         });
 
         const results = await Promise.all(months.map(async ({ year, month, label }) => {
-            const start = `${year}-${String(month).padStart(2, '0')}-01`;
-            const end = new Date(year, month, 0).toISOString().split('T')[0];
-            const res = await this.bookingRepo
-                .createQueryBuilder('b')
-                .select('COALESCE(SUM(b.price), 0)', 'revenue')
-                .addSelect('COUNT(b.id)', 'bookings')
-                .where('b.date BETWEEN :start AND :end', { start, end })
-                .andWhere('b.status = :status', { status: 'completed' })
+            const start = new Date(year, month - 1, 1);
+            const end = new Date(year, month, 0, 23, 59, 59);
+            const res = await this.transactionRepo
+                .createQueryBuilder('t')
+                .select('COALESCE(SUM(t.amount), 0)', 'revenue')
+                .addSelect('COUNT(t.id)', 'count')
+                .where("t.type = 'payment'")
+                .andWhere("t.status = 'completed'")
+                .andWhere('t.createdAt BETWEEN :start AND :end', { start, end })
                 .getRawOne();
             return {
                 label,
                 revenue: parseFloat(res?.revenue) || 0,
-                bookings: parseInt(res?.bookings) || 0,
+                bookings: parseInt(res?.count) || 0,
             };
         }));
 
@@ -288,5 +304,69 @@ export class AdminService {
             totalBookings,
             completedBookings,
         };
+    }
+
+    async getBookings(page = 1, limit = 10, filters: { status?: string; search?: string } = {}) {
+        const skip = (page - 1) * limit;
+
+        let qb = this.bookingRepo.createQueryBuilder('b')
+            .leftJoinAndSelect('b.user', 'u')
+            .leftJoinAndSelect('b.professional', 'pro')
+            .leftJoinAndSelect('pro.user', 'proUser')
+            .leftJoinAndSelect('b.professionalService', 'ps')
+            .leftJoinAndSelect('ps.service', 'svc')
+            .orderBy('b.date', 'DESC')
+            .addOrderBy('b.startTime', 'DESC');
+
+        if (filters.status) {
+            qb = qb.where('b.status = :status', { status: filters.status });
+        }
+
+        if (filters.search) {
+            const search = `%${filters.search}%`;
+            const condition = filters.status ? 'andWhere' : 'where';
+            qb = qb[condition](
+                '(LOWER(u.name) LIKE LOWER(:s) OR LOWER(u."lastName") LIKE LOWER(:s) OR LOWER(proUser.name) LIKE LOWER(:s))',
+                { s: search }
+            );
+        }
+
+        const [data, total] = await qb.skip(skip).take(limit).getManyAndCount();
+
+        // Stats always over all bookings
+        const statsRaw = await this.bookingRepo.createQueryBuilder('b')
+            .select('b.status', 'status')
+            .addSelect('COUNT(*)', 'count')
+            .addSelect('SUM(b.price)', 'total')
+            .groupBy('b.status')
+            .getRawMany();
+
+        const stats = { total: 0, pending: 0, confirmed: 0, completed: 0, cancelled: 0, revenue: 0 };
+        for (const row of statsRaw) {
+            const count = parseInt(row.count) || 0;
+            const sum = parseFloat(row.total) || 0;
+            stats.total += count;
+            if (row.status === 'pending') stats.pending = count;
+            if (row.status === 'confirmed') stats.confirmed = count;
+            if (row.status === 'completed') { stats.completed = count; stats.revenue += sum; }
+            if (row.status === 'cancelled') stats.cancelled = count;
+        }
+
+        return {
+            data,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit),
+            stats,
+        };
+    }
+
+    async updateBookingStatus(id: number, status: string) {
+        await this.bookingRepo.update(id, { status: status as any });
+        return this.bookingRepo.findOne({
+            where: { id },
+            relations: ['user', 'professional', 'professional.user', 'professionalService', 'professionalService.service'],
+        });
     }
 }

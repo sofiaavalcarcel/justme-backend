@@ -9,6 +9,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_started
     networks:
       - stg_net
 
@@ -39,6 +41,12 @@ services:
       PGADMIN_DEFAULT_PASSWORD: root
     ports:
       - "5051:80"
+    networks:
+      - stg_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: justme_redis_stg
     networks:
       - stg_net
 

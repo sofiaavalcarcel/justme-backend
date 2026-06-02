@@ -103,7 +103,7 @@ export class AdminAiService {
     const [revenueRaw, ratingRaw, topServiceRaw, activeProsRaw, highCancelRaw, recentUsersRaw, prevUsersRaw, activeUsersRaw] =
       await Promise.all([
         this.transactionRepo.createQueryBuilder('t')
-          .select("SUM(CASE WHEN t.type='payment' THEN t.amount ELSE 0 END)", 'rev')
+          .select("SUM(CASE WHEN t.type='payment' AND t.status='completed' THEN t.amount ELSE 0 END)", 'rev')
           .getRawOne(),
         this.proRepo.createQueryBuilder('p').select('AVG(p.averageRating)', 'avg').where('p.averageRating > 0').getRawOne(),
         this.bookingRepo.createQueryBuilder('b')

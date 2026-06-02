@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Builds
+dist/
+build/
+postgres_data/
+postgres_data_stg/
+postgres_data_prod/
+uploads/
+
+# Coverage and cache
+coverage/
+.nyc_output/
+.cache/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Media and bin
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.pdf
+*.zip
+
+# System & IDEs
+.DS_Store
+.idea/
+.vscode/
+
+# Lock files
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# Local envs
+.env*.local
+.env
+.prod.env
+.stg.env

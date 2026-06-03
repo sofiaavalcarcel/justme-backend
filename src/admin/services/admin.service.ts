@@ -4,7 +4,7 @@ import { Repository, ILike } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Professional } from '../../professionals/entities/professional.entity';
 import { Booking, BookingStatus } from '../../bookings/entities/booking.entity';
-import { Transaction } from '../../wallet/entities/transaction.entity';
+import { Transaction, TransactionType, TransactionStatus } from '../../wallet/entities/transaction.entity';
 import { Service } from '../../services/entities/service.entity';
 import { BookingsService } from '../../bookings/services/bookings.service';
 
@@ -320,14 +320,20 @@ export class AdminService {
         const results = await Promise.all(months.map(async ({ year, month, label }) => {
             const start = new Date(year, month - 1, 1);
             const end = new Date(year, month, 0, 23, 59, 59);
+
+            // TOP_UP: platform income (professionals loading balance)
+            // COMMISSION: deducted from professionals — represented as negative, use ABS
             const res = await this.transactionRepo
                 .createQueryBuilder('t')
-                .select('COALESCE(SUM(t.amount), 0)', 'revenue')
+                .select(
+                    `COALESCE(SUM(CASE WHEN t.type = '${TransactionType.COMMISSION}' THEN ABS(t.amount) ELSE 0 END), 0)`,
+                    'revenue',
+                )
                 .addSelect('COUNT(t.id)', 'count')
-                .where("t.type = 'payment'")
-                .andWhere("t.status = 'completed'")
+                .where('t.status = :status', { status: TransactionStatus.COMPLETED })
                 .andWhere('t.createdAt BETWEEN :start AND :end', { start, end })
                 .getRawOne();
+
             return {
                 label,
                 revenue: parseFloat(res?.revenue) || 0,
@@ -372,69 +378,5 @@ export class AdminService {
             totalBookings,
             completedBookings,
         };
-    }
-
-    async getBookings(page = 1, limit = 10, filters: { status?: string; search?: string } = {}) {
-        const skip = (page - 1) * limit;
-
-        let qb = this.bookingRepo.createQueryBuilder('b')
-            .leftJoinAndSelect('b.user', 'u')
-            .leftJoinAndSelect('b.professional', 'pro')
-            .leftJoinAndSelect('pro.user', 'proUser')
-            .leftJoinAndSelect('b.professionalService', 'ps')
-            .leftJoinAndSelect('ps.service', 'svc')
-            .orderBy('b.date', 'DESC')
-            .addOrderBy('b.startTime', 'DESC');
-
-        if (filters.status) {
-            qb = qb.where('b.status = :status', { status: filters.status });
-        }
-
-        if (filters.search) {
-            const search = `%${filters.search}%`;
-            const condition = filters.status ? 'andWhere' : 'where';
-            qb = qb[condition](
-                '(LOWER(u.name) LIKE LOWER(:s) OR LOWER(u."lastName") LIKE LOWER(:s) OR LOWER(proUser.name) LIKE LOWER(:s))',
-                { s: search }
-            );
-        }
-
-        const [data, total] = await qb.skip(skip).take(limit).getManyAndCount();
-
-        // Stats always over all bookings
-        const statsRaw = await this.bookingRepo.createQueryBuilder('b')
-            .select('b.status', 'status')
-            .addSelect('COUNT(*)', 'count')
-            .addSelect('SUM(b.price)', 'total')
-            .groupBy('b.status')
-            .getRawMany();
-
-        const stats = { total: 0, pending: 0, confirmed: 0, completed: 0, cancelled: 0, revenue: 0 };
-        for (const row of statsRaw) {
-            const count = parseInt(row.count) || 0;
-            const sum = parseFloat(row.total) || 0;
-            stats.total += count;
-            if (row.status === 'pending') stats.pending = count;
-            if (row.status === 'confirmed') stats.confirmed = count;
-            if (row.status === 'completed') { stats.completed = count; stats.revenue += sum; }
-            if (row.status === 'cancelled') stats.cancelled = count;
-        }
-
-        return {
-            data,
-            total,
-            page,
-            limit,
-            totalPages: Math.ceil(total / limit),
-            stats,
-        };
-    }
-
-    async updateBookingStatus(id: number, status: string) {
-        await this.bookingRepo.update(id, { status: status as any });
-        return this.bookingRepo.findOne({
-            where: { id },
-            relations: ['user', 'professional', 'professional.user', 'professionalService', 'professionalService.service'],
-        });
     }
 }

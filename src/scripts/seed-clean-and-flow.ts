@@ -220,13 +220,25 @@ async function bootstrap() {
             }));
             savedPros.push(pro);
 
-            // Crear billetera para el profesional
+            // Crear billetera para el profesional con saldo operativo inicial
+            const initialTopUp = 500000;
             const wallet = await walletRepo.save(walletRepo.create({
                 professionalId: pro.id,
-                balance: 0.00, // Comenzará en 0 e incrementará con las transacciones sembradas
+                balance: initialTopUp,
                 currency: 'COP'
             }));
             savedWallets.push(wallet);
+
+            // Registrar la recarga inicial como transacción TOP_UP
+            await transactionRepo.save(transactionRepo.create({
+                walletId: wallet.id,
+                type: TransactionType.TOP_UP,
+                amount: initialTopUp,
+                balanceBefore: 0,
+                balanceAfter: initialTopUp,
+                description: 'Saldo operativo inicial de bienvenida (seed)',
+                status: TransactionStatus.COMPLETED,
+            } as any));
 
             // Horario de atención
             const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
@@ -355,38 +367,34 @@ async function bootstrap() {
                     updatedAt: bookingDate
                 }));
 
-                // Si está completada, creamos transacciones asociadas para popular el gráfico e ingresos
+                // Si está completada, creamos transacción de comisión del 9% (nuevo modelo operativo)
                 if (status === BookingStatus.COMPLETED) {
                     const wallet = savedWallets.find(w => w.professionalId === professional.id);
                     if (wallet) {
-                        // 1. Transacción de pago del cliente al profesional
-                        const paymentTx = transactionRepo.create({
-                            walletId: wallet.id,
-                            type: TransactionType.PAYMENT,
-                            amount: price,
-                            description: `Pago recibido por reserva #${booking.id}: ${proService.service.name}`,
-                            status: TransactionStatus.COMPLETED,
-                            createdAt: bookingDate
-                        });
-                        await transactionRepo.save(paymentTx);
-                        totalRevenueSum += price;
+                        const commissionRate = 0.09;
+                        const commissionAmount = Math.round(price * commissionRate);
+                        const balanceBefore = Number(wallet.balance);
+                        const balanceAfter = balanceBefore - commissionAmount;
 
-                        // 2. Transacción de comisión cobrada por la plataforma (15%)
-                        const commissionAmount = Math.round(price * 0.15);
+                        // COMMISSION: 9% deducted automatically on booking completion
                         const commissionTx = transactionRepo.create({
                             walletId: wallet.id,
                             type: TransactionType.COMMISSION,
-                            amount: commissionAmount,
-                            description: `Comisión de plataforma (15%) por reserva #${booking.id}`,
+                            amount: -commissionAmount,
+                            serviceAmount: price,
+                            commissionPercentage: commissionRate,
+                            balanceBefore,
+                            balanceAfter,
+                            relatedBookingId: booking.id,
+                            description: `Comisión de plataforma (9%) por reserva #${booking.id}: ${proService.service?.name ?? 'Servicio'}`,
                             status: TransactionStatus.COMPLETED,
-                            createdAt: bookingDate
-                        });
+                            createdAt: bookingDate,
+                        } as any);
                         await transactionRepo.save(commissionTx);
                         totalCommissionSum += commissionAmount;
 
-                        // Actualizar balance de la billetera del profesional
-                        const netEarnings = price - commissionAmount;
-                        wallet.balance = Number(wallet.balance) + netEarnings;
+                        // Deduct from wallet balance
+                        wallet.balance = Math.max(0, balanceAfter);
                         await walletRepo.save(wallet);
                     }
 

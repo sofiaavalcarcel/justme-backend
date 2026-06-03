@@ -56,6 +56,26 @@ export class AdminController {
         return this.adminService.verifyProfessional(id);
     }
 
+    @Get('bookings')
+    @ApiOperation({ summary: 'Obtener listado paginado de reservas/citas' })
+    getBookings(
+        @Query('page') page?: number,
+        @Query('limit') limit?: number,
+        @Query('status') status?: string,
+        @Query('search') search?: string,
+    ) {
+        return this.adminService.getBookings(page ? Number(page) : 1, limit ? Number(limit) : 10, { status, search });
+    }
+
+    @Patch('bookings/:id/status')
+    @ApiOperation({ summary: 'Actualizar el estado de una cita de forma administrativa' })
+    updateBookingStatus(
+        @Param('id', ParseIntPipe) id: number,
+        @Body('status') status: string,
+    ) {
+        return this.adminService.updateBookingStatus(id, status);
+    }
+
     @Get('services')
     @ApiOperation({ summary: 'Obtener todas las categorías de servicios (incluyendo inactivas)' })
     getServices() {

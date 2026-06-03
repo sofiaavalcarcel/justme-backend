@@ -3,7 +3,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { WalletService } from '../services/wallet.service';
 
-@ApiTags('Billetera')
+@ApiTags('Billetera Operativa')
 @Controller('wallet')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
@@ -11,27 +11,23 @@ export class WalletController {
     constructor(private readonly walletService: WalletService) {}
 
     @Get(':professionalId')
-    @ApiOperation({ summary: 'Obtener balance y transacciones de la billetera' })
+    @ApiOperation({ summary: 'Obtener saldo operativo y historial de transacciones' })
     getWallet(@Param('professionalId', ParseIntPipe) professionalId: number) {
         return this.walletService.getWalletWithTransactions(professionalId);
     }
 
+    @Get(':professionalId/can-book')
+    @ApiOperation({ summary: 'Verificar si el profesional puede recibir nuevas reservas (balance > 0)' })
+    canBook(@Param('professionalId', ParseIntPipe) professionalId: number) {
+        return this.walletService.canAcceptBookings(professionalId);
+    }
+
     @Post(':professionalId/recharge')
-    @ApiOperation({ summary: 'Recargar billetera' })
+    @ApiOperation({ summary: 'Recargar saldo operativo (solo desde PaymentsService vía Stripe)' })
     async recharge(
         @Param('professionalId', ParseIntPipe) professionalId: number,
         @Body('amount') amount: number,
     ) {
-        try {
-            return await this.walletService.recharge(professionalId, amount);
-        } catch (error) {
-            console.error('DEBUG - Recharge Controller Error:', error);
-            return {
-                error: true,
-                message: error.message,
-                stack: error.stack,
-                details: 'This is a debug response to trace the 500 error'
-            };
-        }
+        return this.walletService.topUp(professionalId, amount);
     }
 }

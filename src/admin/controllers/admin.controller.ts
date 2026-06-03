@@ -1,4 +1,4 @@
-import { Controller, Get, Patch, Put, Param, ParseIntPipe, Query, UseGuards, Body } from '@nestjs/common';
+import { Controller, Get, Patch, Put, Param, ParseIntPipe, Query, UseGuards, Body, DefaultValuePipe, ParseIntPipe as PIP } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -95,5 +95,25 @@ export class AdminController {
     @ApiOperation({ summary: 'Actualizar perfil del profesional (Verificación/Visibilidad)' })
     updateProfessional(@Param('id', ParseIntPipe) id: number, @Body() data: any) {
         return this.adminService.updateProfessional(id, data);
+    }
+
+    @Get('bookings')
+    @ApiOperation({ summary: 'Listar citas paginadas con filtros' })
+    getBookings(
+        @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
+        @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
+        @Query('status') status?: string,
+        @Query('search') search?: string,
+    ) {
+        return this.adminService.getBookings(page, limit, { status, search });
+    }
+
+    @Patch('bookings/:id/status')
+    @ApiOperation({ summary: 'Actualizar estado de una cita' })
+    updateBookingStatus(
+        @Param('id', ParseIntPipe) id: number,
+        @Body('status') status: string,
+    ) {
+        return this.adminService.updateBookingStatus(id, status);
     }
 }

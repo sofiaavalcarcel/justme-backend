@@ -29,6 +29,14 @@ services:
     networks:
       - dev_net
 
+  redis:
+    image: redis:7-alpine
+    container_name: justme_redis_dev
+    ports:
+      - "6379:6379"
+    networks:
+      - dev_net
+
 volumes:
   postgres_dev_data:
 

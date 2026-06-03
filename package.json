@@ -27,7 +27,8 @@
     "migration:revert": "node ./node_modules/typeorm/cli.js migration:revert -d ./dist/database/data-source.js",
     "seed:dev": "cross-env NODE_ENV=dev ts-node -r tsconfig-paths/register ./src/scripts/seed.ts",
     "seed-full:dev": "cross-env NODE_ENV=dev ts-node -r tsconfig-paths/register ./src/scripts/seed-full.ts",
-    "seed-rbac:dev": "cross-env NODE_ENV=dev ts-node -r tsconfig-paths/register ./src/scripts/seed-rbac.ts"
+    "seed-rbac:dev": "cross-env NODE_ENV=dev ts-node -r tsconfig-paths/register ./src/scripts/seed-rbac.ts",
+    "seed:flow": "cross-env NODE_ENV=dev ts-node -r tsconfig-paths/register ./src/scripts/seed-clean-and-flow.ts"
   },
   "dependencies": {
     "@nestjs-modules/mailer": "^2.3.4",
@@ -113,6 +114,9 @@
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
       "^.+\\.(t|j)s$": "ts-jest"
+    },
+    "moduleNameMapper": {
+      "^src/(.*)$": "<rootDir>/$1"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

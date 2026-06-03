@@ -3,9 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Professional } from '../../professionals/entities/professional.entity';
-import { Booking } from '../../bookings/entities/booking.entity';
+import { Booking, BookingStatus } from '../../bookings/entities/booking.entity';
 import { Transaction } from '../../wallet/entities/transaction.entity';
 import { Service } from '../../services/entities/service.entity';
+import { BookingsService } from '../../bookings/services/bookings.service';
 
 @Injectable()
 export class AdminService {
@@ -15,6 +16,7 @@ export class AdminService {
         @InjectRepository(Booking) private bookingRepo: Repository<Booking>,
         @InjectRepository(Transaction) private transactionRepo: Repository<Transaction>,
         @InjectRepository(Service) private serviceRepo: Repository<Service>,
+        private readonly bookingsService: BookingsService,
     ) {}
 
     async getDashboardStats() {
@@ -28,8 +30,8 @@ export class AdminService {
         // Revenue calculation — only completed transactions
         const revenueResult = await this.transactionRepo
             .createQueryBuilder('t')
-            .select('SUM(CASE WHEN t.type = \'payment\' AND t.status = \'completed\' THEN t.amount ELSE 0 END)', 'totalRevenue')
-            .addSelect('SUM(CASE WHEN t.type = \'commission\' AND t.status = \'completed\' THEN ABS(t.amount) ELSE 0 END)', 'commissionsCollected')
+            .select('SUM(CASE WHEN t.type = \'TOP_UP\' THEN t.amount ELSE 0 END)', 'totalRevenue')
+            .addSelect('SUM(CASE WHEN t.type = \'COMMISSION\' THEN ABS(t.amount) ELSE 0 END)', 'commissionsCollected')
             .getRawOne();
 
         // Average rating
@@ -48,6 +50,72 @@ export class AdminService {
             activeServices,
             avgRating: parseFloat(ratingResult?.avgRating) || 0,
         };
+    }
+
+    async getBookings(page: number = 1, limit: number = 10, filters: { status?: string; search?: string } = {}) {
+        const { status, search } = filters;
+
+        const queryBuilder = this.bookingRepo.createQueryBuilder('booking')
+            .leftJoinAndSelect('booking.user', 'user')
+            .leftJoinAndSelect('booking.professional', 'professional')
+            .leftJoinAndSelect('professional.user', 'proUser')
+            .leftJoinAndSelect('booking.professionalService', 'ps')
+            .leftJoinAndSelect('ps.service', 'svc');
+
+        if (status) {
+            queryBuilder.andWhere('booking.status = :status', { status });
+        }
+
+        if (search) {
+            queryBuilder.andWhere(
+                '(user.name ILIKE :search OR user.lastName ILIKE :search OR proUser.name ILIKE :search OR svc.name ILIKE :search)',
+                { search: `%${search}%` }
+            );
+        }
+
+        queryBuilder
+            .orderBy('booking.date', 'DESC')
+            .addOrderBy('booking.startTime', 'DESC')
+            .skip((page - 1) * limit)
+            .take(limit);
+
+        const [data, total] = await queryBuilder.getManyAndCount();
+
+        // Stats calculation
+        const [totalAll, pending, completed, cancelled] = await Promise.all([
+            this.bookingRepo.count(),
+            this.bookingRepo.count({ where: { status: BookingStatus.PENDING } }),
+            this.bookingRepo.count({ where: { status: BookingStatus.COMPLETED } }),
+            this.bookingRepo.count({ where: { status: BookingStatus.CANCELLED } }),
+        ]);
+
+        const revenueResult = await this.bookingRepo
+            .createQueryBuilder('b')
+            .select('SUM(b.price)', 'revenue')
+            .where('b.status = :status', { status: BookingStatus.COMPLETED })
+            .getRawOne();
+        const revenue = parseFloat(revenueResult?.revenue) || 0;
+
+        const stats = {
+            total: totalAll,
+            pending,
+            completed,
+            cancelled,
+            revenue,
+        };
+
+        return {
+            data,
+            total,
+            page,
+            limit,
+            totalPages: Math.ceil(total / limit),
+            stats,
+        };
+    }
+
+    async updateBookingStatus(id: number, status: string) {
+        return this.bookingsService.updateStatus(id, status as BookingStatus);
     }
 
     async getUsers(page: number = 1, limit: number = 20, search?: string) {

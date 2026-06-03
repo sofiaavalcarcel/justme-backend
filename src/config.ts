@@ -25,5 +25,9 @@ export default registerAs('config', () => {
             clientSecret: process.env.GOOGLE_CLIENT_SECRET,
             callbackUrl: process.env.GOOGLE_CALLBACK_URL,
         },
+        stripe: {
+            secretKey: process.env.STRIPE_SECRET_KEY,
+            webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+        },
     };
 });

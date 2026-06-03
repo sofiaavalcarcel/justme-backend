@@ -1,48 +1,58 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { Wallet } from '../entities/wallet.entity';
 import { Transaction, TransactionType, TransactionStatus } from '../entities/transaction.entity';
-import { ConfigService } from '@nestjs/config';
 import { NotificationsService } from '../../notifications/services/notifications.service';
 import { NotificationType } from '../../notifications/entities/notification.entity';
 import { ProfessionalsService } from '../../professionals/services/professionals.service';
 
+const COMMISSION_RATE      = 0.09;
+const LOW_BALANCE_COP      = 20_000;   // warn threshold
+const MIN_BALANCE_COP      = -20_000;  // hide profile threshold
+
+/**
+ * WalletService — Operational Balance Model
+ *
+ * The wallet is NOT a banking wallet. It is a prepaid operational credit that
+ * professionals must maintain to remain visible and receive bookings on the
+ * JUSTME platform.
+ *
+ * Business rules:
+ *  1. Professionals top-up via Stripe.
+ *  2. When a booking is marked COMPLETED, 9% of the service price is automatically
+ *     deducted as a platform commission.
+ *  3. New bookings are blocked when balance ≤ 0.
+ *  4. Professional profile is hidden when balance < MIN_BALANCE_COP.
+ */
 @Injectable()
 export class WalletService {
-    private readonly LOW_BALANCE_USD = 5;
-    private readonly MIN_BALANCE_USD = -5;
-    private readonly LOW_BALANCE_COP = 20000;
-    private readonly MIN_BALANCE_COP = -20000;
 
     constructor(
-        @InjectRepository(Wallet) private walletRepo: Repository<Wallet>,
-        @InjectRepository(Transaction) private transactionRepo: Repository<Transaction>,
-        private configService: ConfigService,
-        private notificationsService: NotificationsService,
-        private professionalsService: ProfessionalsService,
+        @InjectRepository(Wallet)      private walletRepo:       Repository<Wallet>,
+        @InjectRepository(Transaction) private transactionRepo:  Repository<Transaction>,
+        private readonly dataSource:           DataSource,
+        private readonly notificationsService: NotificationsService,
+        private readonly professionalsService: ProfessionalsService,
     ) {}
 
+    // ─── Helpers ──────────────────────────────────────────────────────────────
+
     async getOrCreateWallet(professionalId: number): Promise<Wallet> {
-        // ULTRA-LIGHT CHECK: Direct query to avoid heavy relations that cause 500 errors
         const proExists = await this.walletRepo.query(
             'SELECT id FROM professionals WHERE id = $1',
-            [professionalId]
+            [professionalId],
         );
-        
-        if (!proExists || proExists.length === 0) {
-            throw new BadRequestException(`Professional ID ${professionalId} does not exist in DB.`);
+        if (!proExists?.length) {
+            throw new BadRequestException(`Professional ${professionalId} not found.`);
         }
 
-        let wallet = await this.walletRepo.findOne({
-            where: { professionalId },
-        });
-
+        let wallet = await this.walletRepo.findOne({ where: { professionalId } });
         if (!wallet) {
-            wallet = this.walletRepo.create({ professionalId, balance: 0, currency: 'COP' });
-            wallet = await this.walletRepo.save(wallet);
+            wallet = await this.walletRepo.save(
+                this.walletRepo.create({ professionalId, balance: 0, currency: 'COP' }),
+            );
         }
-
         return wallet;
     }
 
@@ -56,111 +66,168 @@ export class WalletService {
         return { ...wallet, transactions };
     }
 
-    async processPayment(professionalId: number, amount: number, description: string, userId: number) {
-        const commissionRate = this.configService.get<number>('config.platform.commissionRate') || 0.09;
-        const commission = amount * commissionRate;
-        const netAmount = amount - commission;
+    // ─── Balance check ─────────────────────────────────────────────────────────
+
+    /**
+     * Returns whether the professional can accept new bookings.
+     * Rule: balance must be > 0.
+     */
+    async canAcceptBookings(professionalId: number): Promise<{ canBook: boolean; balance: number }> {
+        const wallet = await this.getOrCreateWallet(professionalId);
+        const balance = Number(wallet.balance);
+        return { canBook: balance > 0, balance };
+    }
+
+    // ─── Top-Up (Stripe) ───────────────────────────────────────────────────────
+
+    /**
+     * Credits the professional's operational balance.
+     * Called after a successful Stripe payment confirmation.
+     * Idempotent via Stripe paymentIntentId de-duplication.
+     */
+    async topUp(professionalId: number, amount: number, stripePaymentIntentId?: string): Promise<Wallet> {
+        const rechargeAmount = Number(amount);
+        if (isNaN(rechargeAmount) || rechargeAmount <= 0) {
+            throw new BadRequestException('Monto de recarga inválido.');
+        }
 
         const wallet = await this.getOrCreateWallet(professionalId);
 
-        // Create payment transaction
+        const description = stripePaymentIntentId
+            ? `Recarga via Stripe (ID: ${stripePaymentIntentId})`
+            : 'Recarga de saldo operativo';
+
+        // Idempotency: reject duplicate Stripe payment intents
+        if (stripePaymentIntentId) {
+            const duplicate = await this.transactionRepo.findOne({ where: { description } });
+            if (duplicate) return wallet;
+        }
+
+        const balanceBefore = Number(wallet.balance);
+        const balanceAfter  = balanceBefore + rechargeAmount;
+
         await this.transactionRepo.save(
             this.transactionRepo.create({
-                walletId: wallet.id,
-                type: TransactionType.PAYMENT,
-                amount: netAmount,
+                walletId:    wallet.id,
+                type:        TransactionType.TOP_UP,
+                amount:      rechargeAmount,
+                balanceBefore,
+                balanceAfter,
                 description,
-                status: TransactionStatus.COMPLETED,
+                status:      TransactionStatus.COMPLETED,
             }),
         );
 
-        // Create commission transaction
-        await this.transactionRepo.save(
-            this.transactionRepo.create({
-                walletId: wallet.id,
-                type: TransactionType.COMMISSION,
-                amount: -commission,
-                description: `${(commissionRate * 100).toFixed(0)}% commission — ${description}`,
-                status: TransactionStatus.COMPLETED,
-            }),
-        );
+        wallet.balance = balanceAfter;
+        const updated = await this.walletRepo.save(wallet);
 
-        // Update balance
-        wallet.balance = Number(wallet.balance) + netAmount;
-        await this.walletRepo.save(wallet);
+        // Re-activate visibility if balance is now above minimum
+        if (balanceAfter > MIN_BALANCE_COP) {
+            await this.professionalsService.setVisibility(professionalId, true);
+        }
 
-        // Check low balance
-        await this.checkBalance(wallet, professionalId, userId);
-
-        return wallet;
+        return updated;
     }
 
-    async recharge(professionalId: number, amount: number) {
-        try {
-            const wallet = await this.getOrCreateWallet(professionalId);
-            const rechargeAmount = Number(amount);
+    // ─── Commission Deduction ─────────────────────────────────────────────────
 
-            if (isNaN(rechargeAmount) || rechargeAmount <= 0) {
-                throw new BadRequestException('Invalid recharge amount');
+    /**
+     * Deducts the 9% platform commission when a booking is completed.
+     * Uses a DB transaction to ensure atomicity.
+     * Idempotent: will skip if a COMMISSION row for this booking already exists.
+     *
+     * @param bookingId    The completed booking
+     * @param professionalId
+     * @param servicePrice The gross price of the service paid by the customer
+     */
+    async deductCommission(
+        bookingId:      number,
+        professionalId: number,
+        servicePrice:   number,
+    ): Promise<{ commission: number; balanceAfter: number }> {
+
+        return this.dataSource.transaction(async (manager) => {
+
+            // Idempotency check — skip if already processed
+            const existing = await manager.findOne(Transaction, {
+                where: { relatedBookingId: bookingId, type: TransactionType.COMMISSION },
+            });
+            if (existing) {
+                const wallet = await manager.findOne(Wallet, { where: { professionalId } });
+                return { commission: Math.abs(Number(existing.amount)), balanceAfter: Number(wallet?.balance ?? 0) };
             }
 
-            await this.transactionRepo.save(
-                this.transactionRepo.create({
-                    walletId: wallet.id,
-                    type: TransactionType.RECHARGE,
-                    amount: rechargeAmount,
-                    description: 'Wallet recharge',
-                    status: TransactionStatus.COMPLETED,
+            // Lock the wallet row for update
+            const wallet = await manager
+                .getRepository(Wallet)
+                .createQueryBuilder('wallet')
+                .setLock('pessimistic_write')
+                .where('wallet.professionalId = :professionalId', { professionalId })
+                .getOne();
+
+            if (!wallet) throw new BadRequestException(`Wallet for professional ${professionalId} not found.`);
+
+            const commission    = Math.round(Number(servicePrice) * COMMISSION_RATE);
+            const balanceBefore = Number(wallet.balance);
+            const balanceAfter  = balanceBefore - commission;
+
+            // Save commission transaction
+            await manager.save(
+                manager.create(Transaction, {
+                    walletId:             wallet.id,
+                    type:                 TransactionType.COMMISSION,
+                    amount:               -commission,
+                    serviceAmount:        Number(servicePrice),
+                    commissionPercentage: COMMISSION_RATE,
+                    balanceBefore,
+                    balanceAfter,
+                    relatedBookingId:     bookingId,
+                    description:          `Comisión JUSTME 9% — Reserva #${bookingId}`,
+                    status:               TransactionStatus.COMPLETED,
                 }),
             );
 
-            wallet.balance = Number(wallet.balance) + rechargeAmount;
-            const updatedWallet = await this.walletRepo.save(wallet);
+            // Update balance
+            wallet.balance = balanceAfter;
+            await manager.save(wallet);
 
-            // Check if professional should become visible again
-            const minBalance = this.getMinBalance(wallet.currency);
-            if (Number(updatedWallet.balance) > minBalance) {
-                await this.professionalsService.setVisibility(professionalId, true);
-            }
+            // Post-transaction side effects (outside the DB transaction is fine)
+            setImmediate(() => this.handlePostCommission(wallet, professionalId).catch(console.error));
 
-            return updatedWallet;
-        } catch (error) {
-            console.error(`Recharge failed for professional ${professionalId}:`, error);
-            throw error;
-        }
+            return { commission, balanceAfter };
+        });
     }
 
-    private async checkBalance(wallet: Wallet, professionalId: number, userId: number) {
-        const lowThreshold = this.getLowBalanceThreshold(wallet.currency);
-        const minBalance = this.getMinBalance(wallet.currency);
+    // ─── Private helpers ───────────────────────────────────────────────────────
 
-        if (Number(wallet.balance) <= lowThreshold) {
-            await this.notificationsService.send(
-                userId,
-                'Low Wallet Balance',
-                `Your wallet balance is low (${wallet.currency} ${wallet.balance}). Please recharge to continue receiving bookings.`,
-                NotificationType.WALLET,
-                { walletId: wallet.id },
-            );
-        }
+    private async handlePostCommission(wallet: Wallet, professionalId: number) {
+        const balance = Number(wallet.balance);
 
-        if (Number(wallet.balance) < minBalance) {
+        // Hide profile if balance below minimum
+        if (balance < MIN_BALANCE_COP) {
             await this.professionalsService.setVisibility(professionalId, false);
+        }
+
+        // Fetch userId to send notification
+        const pro = await this.professionalsService.findOne(professionalId).catch(() => null);
+        if (!pro?.userId) return;
+
+        if (balance <= 0) {
             await this.notificationsService.send(
-                userId,
-                'Profile Hidden',
-                'Your profile has been hidden from search results due to negative wallet balance. Please recharge.',
+                pro.userId,
+                '⚠️ Saldo operativo agotado',
+                `Tu saldo operativo ha llegado a $${balance.toLocaleString('es-CO')} COP. No podrás recibir nuevas reservas hasta que recargues.`,
+                NotificationType.WALLET,
+                { walletId: wallet.id },
+            );
+        } else if (balance < LOW_BALANCE_COP) {
+            await this.notificationsService.send(
+                pro.userId,
+                '⚡ Saldo operativo bajo',
+                `Tu saldo operativo es $${balance.toLocaleString('es-CO')} COP. Recarga pronto para seguir recibiendo reservas.`,
                 NotificationType.WALLET,
                 { walletId: wallet.id },
             );
         }
-    }
-
-    private getLowBalanceThreshold(currency: string): number {
-        return currency === 'COP' ? this.LOW_BALANCE_COP : this.LOW_BALANCE_USD;
-    }
-
-    private getMinBalance(currency: string): number {
-        return currency === 'COP' ? this.MIN_BALANCE_COP : this.MIN_BALANCE_USD;
     }
 }

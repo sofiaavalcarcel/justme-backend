@@ -20,21 +20,28 @@ export class BookingsService {
     ) { }
 
     async create(userId: number, dto: CreateBookingDto) {
-        // Get service duration
+        // ── 1. Balance check — block if professional has no operational funds ──
+        const { canBook, balance } = await this.walletService.canAcceptBookings(dto.professionalId);
+        if (!canBook) {
+            throw new BadRequestException(
+                `El profesional no puede recibir reservas en este momento (saldo operativo: $${balance.toLocaleString('es-CO')} COP).`,
+            );
+        }
+
+        // ── 2. Get service details ────────────────────────────────────────────
         const proService = await this.proServiceRepo.findOne({
             where: { id: dto.professionalServiceId },
             relations: ['service'],
         });
         if (!proService) throw new NotFoundException('Professional service not found');
 
-        // Calculate end time
         const endTime = this.addMinutes(dto.startTime, proService.duration);
 
-        // Retrieve professional to get bufferTime
+        // ── 3. Get professional + buffer time ────────────────────────────────
         const professional = await this.professionalsService.findOne(dto.professionalId);
         const bufferTime = professional?.bufferTime !== undefined ? Number(professional.bufferTime) : 15;
 
-        // Check for conflicting bookings
+        // ── 4. Conflict check ─────────────────────────────────────────────────
         const conflict = await this.bookingRepo
             .createQueryBuilder('booking')
             .where('booking.professionalId = :proId', { proId: dto.professionalId })
@@ -52,7 +59,7 @@ export class BookingsService {
             throw new BadRequestException('Time slot conflicts with an existing booking');
         }
 
-        // Spatial Validation (Only check radius if the professional is traveling to the user's home)
+        // ── 5. Spatial validation ─────────────────────────────────────────────
         if (dto.locationType !== LocationType.PROFESSIONAL && dto.latitude !== undefined && dto.longitude !== undefined) {
             const { inRadius } = await this.professionalsService.isLocationInRadius(
                 dto.professionalId,
@@ -64,38 +71,34 @@ export class BookingsService {
             }
         }
 
-        // Create booking (auto-confirmed)
-        const booking = this.bookingRepo.create({
-            userId,
-            professionalId: dto.professionalId,
-            professionalServiceId: dto.professionalServiceId,
-            date: dto.date,
-            startTime: dto.startTime,
-            endTime,
-            price: proService.price,
-            location: dto.location,
-            locationType: dto.locationType,
-            latitude: dto.latitude,
-            longitude: dto.longitude,
-            status: BookingStatus.PENDING,
-        });
+        // ── 6. Save booking ───────────────────────────────────────────────────
+        const booking = await this.bookingRepo.save(
+            this.bookingRepo.create({
+                userId,
+                professionalId:       dto.professionalId,
+                professionalServiceId: dto.professionalServiceId,
+                date:                 dto.date,
+                startTime:            dto.startTime,
+                endTime,
+                price:                proService.price,
+                location:             dto.location,
+                locationType:         dto.locationType,
+                latitude:             dto.latitude,
+                longitude:            dto.longitude,
+                status:               BookingStatus.PENDING,
+            }),
+        );
 
-        const saved = await this.bookingRepo.save({
-            ...booking,
-            status: BookingStatus.PENDING,
-        });
-
-        // Notify professional
-        // const professional = await this.professionalsService.findOne(dto.professionalId);
+        // ── 7. Notify professional ────────────────────────────────────────────
         await this.notificationsService.send(
             professional.userId,
             'Nueva Reserva',
             `Tienes una nueva reserva para ${proService.service?.name || 'servicio'} el ${dto.date} a las ${dto.startTime}`,
             NotificationType.BOOKING,
-            { bookingId: saved.id },
+            { bookingId: booking.id },
         );
 
-        return saved;
+        return booking;
     }
 
     async findUserBookings(userId: number) {
@@ -130,7 +133,6 @@ export class BookingsService {
             throw new BadRequestException('Cannot reschedule a cancelled or completed booking');
         }
 
-        // Get service duration to recalculate endTime
         const proService = await this.proServiceRepo.findOne({
             where: { id: booking.professionalServiceId },
             relations: ['service'],
@@ -138,11 +140,9 @@ export class BookingsService {
         const duration = proService?.duration || 60;
         const endTime = this.addMinutes(startTime, duration);
 
-        // Retrieve professional to get bufferTime
         const professional = await this.professionalsService.findOne(booking.professionalId);
         const bufferTime = professional?.bufferTime !== undefined ? Number(professional.bufferTime) : 15;
 
-        // Check for conflicting bookings (exclude current booking)
         const conflict = await this.bookingRepo
             .createQueryBuilder('booking')
             .where('booking.professionalId = :proId', { proId: booking.professionalId })
@@ -171,12 +171,21 @@ export class BookingsService {
     async updateStatus(id: number, status: BookingStatus) {
         const booking = await this.findOne(id);
         booking.status = status;
+        const saved = await this.bookingRepo.save(booking);
 
         if (status === BookingStatus.COMPLETED) {
+            // Increment completed services counter
             await this.professionalsService.incrementCompletedServices(booking.professionalId);
+
+            // Deduct 9% platform commission from operational balance
+            await this.walletService.deductCommission(
+                booking.id,
+                booking.professionalId,
+                Number(booking.price),
+            );
         }
 
-        return this.bookingRepo.save(booking);
+        return saved;
     }
 
     private addMinutes(time: string, minutes: number): string {

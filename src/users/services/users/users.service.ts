@@ -1,16 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { User } from '../../../users/entities/user.entity';
 import { CreateUserDto, UpdateUserDto } from '../../../users/dtos/user.dto';
 import { RolesService } from '../../../roles/services/roles.service';
 import * as bcrypt from 'bcrypt';
+import { Professional } from '../../../professionals/entities/professional.entity';
+import { Wallet } from '../../../wallet/entities/wallet.entity';
 
 @Injectable()
 export class UsersService {
     constructor(
         @InjectRepository(User) private userRepo: Repository<User>,
         private rolesService: RolesService,
+        private dataSource: DataSource,
     ) {}
 
     async findAll() {
@@ -69,6 +72,30 @@ export class UsersService {
             roles,
         });
         await this.userRepo.save(newUser);
+
+        const hasProRole = roles.some(role => role.name === 'professional');
+        if (hasProRole) {
+            const manager = this.dataSource.manager;
+            const proRepo = manager.getRepository(Professional);
+            const walletRepo = manager.getRepository(Wallet);
+
+            let pro = await proRepo.findOne({ where: { userId: newUser.id } });
+            if (!pro) {
+                pro = proRepo.create({
+                    userId: newUser.id,
+                    verified: false,
+                    isVisible: true,
+                });
+                const savedPro = await proRepo.save(pro);
+
+                let wallet = await walletRepo.findOne({ where: { professionalId: savedPro.id } });
+                if (!wallet) {
+                    await walletRepo.save(
+                        walletRepo.create({ professionalId: savedPro.id, balance: 0, currency: 'COP' }),
+                    );
+                }
+            }
+        }
         
         return this.findOne(newUser.id);
     }
@@ -100,6 +127,29 @@ export class UsersService {
             roles: [roles],
         });
         await this.userRepo.save(newUser);
+
+        if (data.role === 'professional') {
+            const manager = this.dataSource.manager;
+            const proRepo = manager.getRepository(Professional);
+            const walletRepo = manager.getRepository(Wallet);
+
+            let pro = await proRepo.findOne({ where: { userId: newUser.id } });
+            if (!pro) {
+                pro = proRepo.create({
+                    userId: newUser.id,
+                    verified: false,
+                    isVisible: true,
+                });
+                const savedPro = await proRepo.save(pro);
+
+                let wallet = await walletRepo.findOne({ where: { professionalId: savedPro.id } });
+                if (!wallet) {
+                    await walletRepo.save(
+                        walletRepo.create({ professionalId: savedPro.id, balance: 0, currency: 'COP' }),
+                    );
+                }
+            }
+        }
         
         return this.findOne(newUser.id);
     }
@@ -180,6 +230,30 @@ export class UsersService {
                 throw new NotFoundException('Some roles were not found');
             }
             user.roles = roles;
+
+            const hasProRole = roles.some(role => role.name === 'professional');
+            if (hasProRole) {
+                const manager = this.dataSource.manager;
+                const proRepo = manager.getRepository(Professional);
+                const walletRepo = manager.getRepository(Wallet);
+
+                let pro = await proRepo.findOne({ where: { userId: user.id } });
+                if (!pro) {
+                    pro = proRepo.create({
+                        userId: user.id,
+                        verified: false,
+                        isVisible: true,
+                    });
+                    const savedPro = await proRepo.save(pro);
+
+                    let wallet = await walletRepo.findOne({ where: { professionalId: savedPro.id } });
+                    if (!wallet) {
+                        await walletRepo.save(
+                            walletRepo.create({ professionalId: savedPro.id, balance: 0, currency: 'COP' }),
+                        );
+                    }
+                }
+            }
         }
 
         if (password) {

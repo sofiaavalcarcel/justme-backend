@@ -25,7 +25,7 @@ export class ProfessionalsService {
             .createQueryBuilder('professional')
             .leftJoinAndSelect('professional.user', 'user')
             .leftJoinAndSelect('professional.schedules', 'schedules')
-            .leftJoinAndSelect('professional.professionalServices', 'ps')
+            .leftJoinAndSelect('professional.professionalServices', 'ps', 'ps.isActive = true')
             .leftJoinAndSelect('ps.service', 'service')
             .where('professional.isVisible = :visible', { visible: true })
             .andWhere('professional.latitude IS NOT NULL')
@@ -37,9 +37,10 @@ export class ProfessionalsService {
             );
 
         if (dto.service) {
-            query = query.andWhere('service.name ILIKE :serviceName', {
-                serviceName: `%${dto.service}%`,
-            });
+            query = query.andWhere(
+                '(service.name ILIKE :serviceName OR service.category ILIKE :serviceName OR ps.name ILIKE :serviceName)',
+                { serviceName: `%${dto.service}%` }
+            );
         }
 
         if (dto.date && dto.time) {
@@ -244,7 +245,7 @@ export class ProfessionalsService {
 
         const queryBuilder = this.proRepo.createQueryBuilder('pro')
             .leftJoinAndSelect('pro.user', 'user')
-            .leftJoinAndSelect('pro.professionalServices', 'ps')
+            .leftJoinAndSelect('pro.professionalServices', 'ps', 'ps.isActive = true')
             .leftJoinAndSelect('ps.service', 'service')
             .where('pro.isVisible = :visible', { visible: true });
 
@@ -294,14 +295,21 @@ export class ProfessionalsService {
         if (!professional) {
             throw new NotFoundException(`Professional #${id} not found`);
         }
+        if (professional.professionalServices) {
+            professional.professionalServices = professional.professionalServices.filter(ps => ps.isActive);
+        }
         return professional;
     }
 
     async findByUserId(userId: number) {
-        return this.proRepo.findOne({
+        const professional = await this.proRepo.findOne({
             where: { userId },
             relations: ['professionalServices', 'professionalServices.service', 'portfolioImages'],
         });
+        if (professional && professional.professionalServices) {
+            professional.professionalServices = professional.professionalServices.filter(ps => ps.isActive);
+        }
+        return professional;
     }
 
     async create(userId: number, dto: CreateProfessionalDto) {

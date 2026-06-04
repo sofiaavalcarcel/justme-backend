@@ -62,18 +62,23 @@ export class ServicesService {
         try {
             // Ensure the serviceId exists to avoid Foreign Key errors
             let targetServiceId = dto.serviceId;
-            const serviceExists = await this.serviceRepo.findOne({ where: { id: targetServiceId } });
-            
-            if (!serviceExists) {
-                // Fallback to the first available category
-                const firstCategory = await this.findAllCategories(); 
+            if (targetServiceId) {
+                const serviceExists = await this.serviceRepo.findOne({ where: { id: targetServiceId } });
+                if (!serviceExists) targetServiceId = undefined;
+            }
+            if (!targetServiceId) {
+                const firstCategory = await this.findAllCategories();
                 targetServiceId = firstCategory[0].id;
             }
 
             const service = this.proServiceRepo.create({
                 professionalId,
-                ...dto,
+                name: dto.name,
+                description: dto.description,
+                price: dto.price ?? 0,
+                duration: dto.duration ?? 60,
                 serviceId: targetServiceId,
+                isActive: true,
             });
             return await this.proServiceRepo.save(service);
         } catch (error) {
@@ -85,12 +90,25 @@ export class ServicesService {
     async updateProfessionalService(id: number, dto: UpdateProfessionalServiceDto) {
         const service = await this.proServiceRepo.findOne({ where: { id } });
         if (!service) throw new NotFoundException(`Professional service #${id} not found`);
-        this.proServiceRepo.merge(service, dto);
-        return this.proServiceRepo.save(service);
+
+        // Explicitly assign each field so FK columns like serviceId are reliably updated
+        if (dto.name !== undefined)        service.name        = dto.name;
+        if (dto.description !== undefined) service.description = dto.description;
+        if (dto.price !== undefined)       service.price       = dto.price;
+        if (dto.duration !== undefined)    service.duration    = dto.duration;
+        if (dto.serviceId !== undefined)   service.serviceId   = dto.serviceId;
+
+        await this.proServiceRepo.save(service);
+
+        // Re-fetch with the service (category) relation so the caller always gets fresh data
+        return this.proServiceRepo.findOne({ where: { id }, relations: ['service'] });
     }
 
     async removeProfessionalService(id: number) {
-        return this.proServiceRepo.delete(id);
+        const service = await this.proServiceRepo.findOne({ where: { id } });
+        if (!service) throw new NotFoundException(`Professional service #${id} not found`);
+        service.isActive = false;
+        return this.proServiceRepo.save(service);
     }
 
     async findOne(id: number) {

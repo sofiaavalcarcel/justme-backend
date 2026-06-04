@@ -43,7 +43,7 @@ export class ReviewsService {
     async findByProfessional(professionalId: number) {
         return this.reviewRepo.find({
             where: { professionalId },
-            relations: ['user'],
+            relations: ['user', 'booking', 'booking.professionalService'],
             order: { createdAt: 'DESC' },
         });
     }

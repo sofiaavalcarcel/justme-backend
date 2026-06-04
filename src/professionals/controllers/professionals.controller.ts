@@ -9,13 +9,17 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ProfessionalsService } from '../services/professionals.service';
+import { CloudinaryService } from '../services/cloudinary.service';
 import { CreateProfessionalDto, UpdateProfessionalDto, NearbySearchDto, ServiceMatchDto } from '../dtos/professional.dto';
 import { SearchProfessionalsDto } from '../dtos/search-professionals.dto';
 
 @ApiTags('Profesionales')
 @Controller('professionals')
 export class ProfessionalsController {
-    constructor(private readonly professionalsService: ProfessionalsService) {}
+    constructor(
+        private readonly professionalsService: ProfessionalsService,
+        private readonly cloudinaryService: CloudinaryService,
+    ) {}
 
     @Get('nearby')
     @ApiOperation({ summary: 'Encontrar profesionales cerca de una ubicación' })
@@ -76,7 +80,7 @@ export class ProfessionalsController {
         @UploadedFile() file: Express.Multer.File,
         @Body('caption') caption?: string,
     ) {
-        const imageUrl = `/uploads/portfolio/${file?.filename || 'default.jpg'}`;
+        const imageUrl = await this.cloudinaryService.uploadImage(file, 'justme_portfolio');
         return this.professionalsService.addPortfolioImage(id, imageUrl, caption);
     }
 

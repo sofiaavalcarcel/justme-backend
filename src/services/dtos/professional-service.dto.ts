@@ -1,31 +1,36 @@
-import { IsNumber, IsString, IsOptional } from 'class-validator';
+import { IsNumber, IsString, IsOptional, Min } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
 
 export class CreateProfessionalServiceDto {
-    @ApiProperty({ example: 1 })
-    @IsNumber()
+    @ApiPropertyOptional({ example: 1, description: 'ID de categoría de servicio (opcional, se asigna automáticamente)' })
+    @IsOptional()
+    @IsNumber({}, { message: 'serviceId debe ser un número' })
     @Type(() => Number)
-    serviceId: number;
+    serviceId?: number;
 
     @ApiPropertyOptional({ example: 'Corte de Cabello Premium' })
-    @IsString()
     @IsOptional()
+    @IsString({ message: 'name debe ser texto' })
     name?: string;
 
-    @ApiProperty({ example: 35.00 })
-    @IsNumber()
+    @ApiPropertyOptional({ example: 35.00, description: 'Precio del servicio' })
+    @IsOptional()
+    @IsNumber({}, { message: 'price debe ser un número' })
+    @Min(0, { message: 'El precio no puede ser negativo' })
     @Type(() => Number)
-    price: number;
+    price?: number;
 
-    @ApiProperty({ example: 60, description: 'Duration in minutes' })
-    @IsNumber()
+    @ApiPropertyOptional({ example: 60, description: 'Duración en minutos' })
+    @IsOptional()
+    @IsNumber({}, { message: 'duration debe ser un número entero' })
+    @Min(1, { message: 'La duración mínima es 1 minuto' })
     @Type(() => Number)
-    duration: number;
+    duration?: number;
 
     @ApiPropertyOptional({ example: 'Precision haircut with wash and style' })
-    @IsString()
     @IsOptional()
+    @IsString({ message: 'description debe ser texto' })
     description?: string;
 }
 

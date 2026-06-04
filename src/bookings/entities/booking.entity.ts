@@ -3,6 +3,7 @@ import {
     CreateDateColumn,
     Entity,
     ManyToOne,
+    OneToOne,
     JoinColumn,
     PrimaryGeneratedColumn,
     UpdateDateColumn,
@@ -87,4 +88,7 @@ export class Booking {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    @OneToOne('Review', 'booking', { nullable: true })
+    review: any;
 }

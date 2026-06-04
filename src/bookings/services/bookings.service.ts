@@ -104,7 +104,7 @@ export class BookingsService {
     async findUserBookings(userId: number) {
         return this.bookingRepo.find({
             where: { userId },
-            relations: ['professional', 'professional.user', 'professionalService', 'professionalService.service'],
+            relations: ['professional', 'professional.user', 'professionalService', 'professionalService.service', 'review'],
             order: { date: 'DESC', startTime: 'DESC' },
         });
     }

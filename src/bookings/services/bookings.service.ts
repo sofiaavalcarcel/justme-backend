@@ -1,6 +1,6 @@
 import { Injectable, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Between } from 'typeorm';
 import { Booking, BookingStatus, LocationType } from '../entities/booking.entity';
 import { ProfessionalService } from '../../services/entities/professional-service.entity';
 import { CreateBookingDto } from '../dtos/booking.dto';
@@ -183,6 +183,31 @@ export class BookingsService {
                 booking.professionalId,
                 Number(booking.price),
             );
+
+            // ── Incentive check: apply wallet bonus if monthly target reached ──
+            const INCENTIVE_TARGET = 200;
+            const BONUS_AMOUNT = 50_000; // $50,000 COP
+            const INCENTIVE_TITLE = 'Estado Super Pro';
+
+            const now = new Date();
+            const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
+            const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
+
+            const monthlyCompleted = await this.bookingRepo.count({
+                where: {
+                    professionalId: booking.professionalId,
+                    status: BookingStatus.COMPLETED,
+                    date: Between(startOfMonth, endOfMonth + 'T23:59:59.999Z'),
+                },
+            });
+
+            if (monthlyCompleted >= INCENTIVE_TARGET) {
+                await this.walletService.applyIncentiveBonus(
+                    booking.professionalId,
+                    BONUS_AMOUNT,
+                    INCENTIVE_TITLE,
+                );
+            }
         }
 
         return saved;

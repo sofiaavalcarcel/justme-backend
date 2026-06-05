@@ -86,7 +86,7 @@ export class ProfessionalStatsService {
             this.bookingRepo.find({
                 where: {
                     professionalId,
-                    date: Between(startOfWeekStr, endOfWeekStr),
+                    date: Between(startOfWeekStr, endOfWeekStr + 'T23:59:59.999Z'),
                 },
                 relations: ['professionalService', 'professionalService.service'],
             }),
@@ -95,7 +95,7 @@ export class ProfessionalStatsService {
             this.bookingRepo.find({
                 where: {
                     professionalId,
-                    date: Between(startOfMonthStr, endOfMonthStr),
+                    date: Between(startOfMonthStr, endOfMonthStr + 'T23:59:59.999Z'),
                     status: BookingStatus.COMPLETED,
                 },
             }),
@@ -104,7 +104,7 @@ export class ProfessionalStatsService {
             this.bookingRepo.find({
                 where: {
                     professionalId,
-                    date: Between(startOfPrevMonthStr, endOfPrevMonthStr),
+                    date: Between(startOfPrevMonthStr, endOfPrevMonthStr + 'T23:59:59.999Z'),
                     status: BookingStatus.COMPLETED,
                 },
             }),
@@ -182,15 +182,43 @@ export class ProfessionalStatsService {
             .slice(0, 5);
 
         // Incentive progress
+        const INCENTIVE_TARGET = 200;
+        const INCENTIVE_DESCRIPTION = 'Completa <b>200 servicios</b> este mes para desbloquear un <b>Bono de Billetera de $50.000</b> y <b>0% de Comisión</b> por una semana.';
         const incentive = activeIncentive ? {
             id: activeIncentive.id,
             title: activeIncentive.title,
-            description: activeIncentive.description,
-            targetServices: activeIncentive.targetServices,
-            currentServices: professional?.completedServices || 0,
+            description: INCENTIVE_DESCRIPTION,
+            targetServices: INCENTIVE_TARGET,
+            currentServices: monthBookings.length,
             rewardValue: Number(activeIncentive.rewardValue),
             rewardType: activeIncentive.rewardType,
-        } : null;
+        } : {
+            id: 999,
+            title: 'Estado Super Pro',
+            description: INCENTIVE_DESCRIPTION,
+            targetServices: INCENTIVE_TARGET,
+            currentServices: monthBookings.length,
+            rewardValue: 50,
+            rewardType: 'wallet_bonus',
+        };
+
+        const weeklyDetails = weekBookings.map(b => ({
+            id: b.id,
+            date: b.date,
+            time: b.startTime,
+            status: b.status,
+            price: Number(b.price),
+            serviceName: b.professionalService?.service?.name || 'Servicio',
+            userName: b.user?.name || 'Cliente',
+            userAvatar: b.user?.avatar || null,
+        })).sort((a, b) => {
+            const dateA = a.date || '';
+            const dateB = b.date || '';
+            const timeA = a.time || '';
+            const timeB = b.time || '';
+            if (dateA === dateB) return timeA.localeCompare(timeB);
+            return dateA.localeCompare(dateB);
+        });
 
         return {
             todayBookings,
@@ -208,6 +236,7 @@ export class ProfessionalStatsService {
             walletCurrency: wallet?.currency || 'USD',
             weeklyBookingsByDay,
             weeklyEarningsByDay,
+            weeklyDetails,
             topServices,
             recentReviews: recentReviews.map(r => ({
                 id: r.id,

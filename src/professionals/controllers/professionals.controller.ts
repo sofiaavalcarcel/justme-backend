@@ -41,6 +41,18 @@ export class ProfessionalsController {
         return this.professionalsService.matchByService(query);
     }
 
+    @Get('top')
+    @ApiOperation({ summary: 'Top profesionales ordenados por calificación y reseñas' })
+    findTopRated(
+        @Query('limit') limit?: number,
+        @Query('offset') offset?: number,
+    ) {
+        return this.professionalsService.findTopRated(
+            limit ? Number(limit) : 10,
+            offset ? Number(offset) : 0,
+        );
+    }
+
     @Get(':id')
     @ApiOperation({ summary: 'Obtener perfil de profesional por ID' })
     findOne(@Param('id', ParseIntPipe) id: number) {

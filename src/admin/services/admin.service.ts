@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
@@ -6,6 +6,8 @@ import { Professional } from '../../professionals/entities/professional.entity';
 import { Booking, BookingStatus } from '../../bookings/entities/booking.entity';
 import { Transaction, TransactionType, TransactionStatus } from '../../wallet/entities/transaction.entity';
 import { Service } from '../../services/entities/service.entity';
+import { CategoryRequest } from '../../services/entities/category-request.entity';
+import { ReviewCategoryRequestDto } from '../../services/dtos/category-request.dto';
 import { BookingsService } from '../../bookings/services/bookings.service';
 
 @Injectable()
@@ -16,6 +18,7 @@ export class AdminService {
         @InjectRepository(Booking) private bookingRepo: Repository<Booking>,
         @InjectRepository(Transaction) private transactionRepo: Repository<Transaction>,
         @InjectRepository(Service) private serviceRepo: Repository<Service>,
+        @InjectRepository(CategoryRequest) private categoryRequestRepo: Repository<CategoryRequest>,
         private readonly bookingsService: BookingsService,
     ) {}
 
@@ -378,5 +381,62 @@ export class AdminService {
             totalBookings,
             completedBookings,
         };
+    }
+
+    // ─── Solicitudes de nuevas categorías ────────────────────────────────────
+
+    /**
+     * Lista todas las solicitudes de categoría, filtrando por status si se indica.
+     */
+    async getCategoryRequests(status?: string) {
+        const where: any = {};
+        if (status) where.status = status;
+        return this.categoryRequestRepo.find({
+            where,
+            order: { createdAt: 'DESC' },
+            relations: ['professional', 'professional.user'],
+        });
+    }
+
+    /**
+     * El admin aprueba o rechaza una solicitud de categoría.
+     * Si aprueba: crea el Service en el catálogo global automáticamente.
+     */
+    async reviewCategoryRequest(
+        id: number,
+        dto: ReviewCategoryRequestDto,
+        adminUserId: number,
+    ): Promise<CategoryRequest> {
+        const request = await this.categoryRequestRepo.findOne({ where: { id } });
+        if (!request) throw new NotFoundException(`Solicitud #${id} no encontrada`);
+
+        if (request.status !== 'pending') {
+            throw new NotFoundException(`Esta solicitud ya fue procesada (${request.status})`);
+        }
+
+        request.status = dto.action;
+        if (dto.notes !== undefined) request.adminNotes = dto.notes;
+        request.reviewedBy = adminUserId;
+
+        if (dto.action === 'approved') {
+            // Crear la categoría en el catálogo global
+            const newService = this.serviceRepo.create({
+                name: request.name,
+                category: request.category,
+                description: request.description,
+                icon: request.icon,
+                isActive: true,
+            });
+            await this.serviceRepo.save(newService);
+        }
+
+        return this.categoryRequestRepo.save(request);
+    }
+
+    /**
+     * Conteo de solicitudes pendientes para mostrar en el badge del admin.
+     */
+    async getPendingCategoryRequestsCount(): Promise<number> {
+        return this.categoryRequestRepo.count({ where: { status: 'pending' } });
     }
 }

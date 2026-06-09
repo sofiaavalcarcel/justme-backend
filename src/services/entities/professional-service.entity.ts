@@ -5,9 +5,15 @@ import {
     JoinColumn,
     PrimaryGeneratedColumn,
     OneToMany,
+    Unique,
 } from 'typeorm';
 import { Service } from './service.entity';
 
+/**
+ * Un profesional tiene exactamente UN registro por categoría de servicio.
+ * La restricción UNIQUE(professionalId, serviceId) garantiza que no
+ * puede haber duplicados — el UPSERT en ServicesService lo gestiona.
+ */
 @Entity('professional_services')
 export class ProfessionalService {
     @PrimaryGeneratedColumn()
@@ -26,9 +32,6 @@ export class ProfessionalService {
 
     @Column()
     serviceId: number;
-
-    @Column({ type: 'varchar', length: 255, nullable: true })
-    name: string;
 
     @Column({ type: 'decimal', precision: 10, scale: 2 })
     price: number;

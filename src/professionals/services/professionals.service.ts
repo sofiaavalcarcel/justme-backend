@@ -37,8 +37,9 @@ export class ProfessionalsService {
             );
 
         if (dto.service) {
+            // Filtra por nombre o categoría global — sin usar ps.name (ya no existe)
             query = query.andWhere(
-                '(service.name ILIKE :serviceName OR service.category ILIKE :serviceName OR ps.name ILIKE :serviceName)',
+                '(service.name ILIKE :serviceName OR service.category ILIKE :serviceName)',
                 { serviceName: `%${dto.service}%` }
             );
         }
@@ -118,9 +119,22 @@ export class ProfessionalsService {
 
         const { entities, raw } = await query.getRawAndEntities();
 
-        return entities.map((pro, i) => ({
+        // DISTINCT manual: eliminar duplicados por id de profesional
+        // (puede haber filas duplicadas si el profesional tiene varias categorías activas)
+        const seen = new Set<number>();
+        const unique: typeof entities = [];
+        const uniqueRaw: typeof raw = [];
+        entities.forEach((pro, i) => {
+            if (!seen.has(pro.id)) {
+                seen.add(pro.id);
+                unique.push(pro);
+                uniqueRaw.push(raw[i]);
+            }
+        });
+
+        return unique.map((pro, i) => ({
             ...pro,
-            distance: parseFloat(parseFloat(raw[i]?.distance_km || '0').toFixed(1)),
+            distance: parseFloat(parseFloat(uniqueRaw[i]?.distance_km || '0').toFixed(1)),
         }));
     }
 
@@ -250,7 +264,11 @@ export class ProfessionalsService {
             .where('pro.isVisible = :visible', { visible: true });
 
         if (sector) {
-            queryBuilder.andWhere('service.name ILIKE :sector', { sector: `%${sector}%` });
+            // Filtra por categoría global (service.name o service.category)
+            queryBuilder.andWhere(
+                '(service.name ILIKE :sector OR service.category ILIKE :sector)',
+                { sector: `%${sector}%` }
+            );
         }
 
         queryBuilder.andWhere(

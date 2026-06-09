@@ -11,13 +11,15 @@ const configuration = config();
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
-  host: configuration.dataBase.host,
-  port: configuration.dataBase.port,
-  username: configuration.dataBase.user,
-  password: configuration.dataBase.password,
-  database: configuration.dataBase.name,
+  url: process.env.DATABASE_URL,
+  host: !process.env.DATABASE_URL ? configuration.dataBase.host : undefined,
+  port: !process.env.DATABASE_URL ? configuration.dataBase.port : undefined,
+  username: !process.env.DATABASE_URL ? configuration.dataBase.user : undefined,
+  password: !process.env.DATABASE_URL ? configuration.dataBase.password : undefined,
+  database: !process.env.DATABASE_URL ? configuration.dataBase.name : undefined,
   synchronize: false,
   logging: true,
+  ssl: process.env.DATABASE_URL ? { rejectUnauthorized: false } : false,
   entities: [join(__dirname, '..', '**', '*.entity.{ts,js}')],
   migrations: [join(__dirname, 'migrations', '*.{ts,js}')],
 });

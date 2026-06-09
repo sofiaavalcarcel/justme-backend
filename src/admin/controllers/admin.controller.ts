@@ -1,10 +1,11 @@
-import { Controller, Get, Patch, Put, Param, ParseIntPipe, Query, UseGuards, Body, DefaultValuePipe, ParseIntPipe as PIP } from '@nestjs/common';
+import { Controller, Get, Patch, Put, Param, ParseIntPipe, Query, UseGuards, Body, DefaultValuePipe, ParseIntPipe as PIP, Req } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { AdminService } from '../services/admin.service';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { ReviewCategoryRequestDto } from '../../services/dtos/category-request.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -115,5 +116,29 @@ export class AdminController {
         @Body('status') status: string,
     ) {
         return this.adminService.updateBookingStatus(id, status);
+    }
+
+    // ─── Category Requests ────────────────────────────────────────────────────
+
+    @Get('category-requests')
+    @ApiOperation({ summary: 'Listar solicitudes de nuevas categorías (filtrar por status)' })
+    getCategoryRequests(@Query('status') status?: string) {
+        return this.adminService.getCategoryRequests(status);
+    }
+
+    @Patch('category-requests/:id/review')
+    @ApiOperation({ summary: 'Aprobar o rechazar una solicitud de categoría' })
+    reviewCategoryRequest(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: ReviewCategoryRequestDto,
+        @Req() req: any,
+    ) {
+        return this.adminService.reviewCategoryRequest(id, dto, req.user?.id);
+    }
+
+    @Get('category-requests/pending-count')
+    @ApiOperation({ summary: 'Número de solicitudes de categoría pendientes' })
+    getPendingCategoryRequestsCount() {
+        return this.adminService.getPendingCategoryRequestsCount();
     }
 }

@@ -278,6 +278,27 @@ export class ProfessionalsService {
         return { data, total, limit, offset };
     }
 
+    /**
+     * Returns all visible professionals sorted by rating (DESC) then reviewCount (DESC).
+     * Used by the home screen "Top Professionals" and the "All Professionals" screen.
+     */
+    async findTopRated(limit = 10, offset = 0) {
+        const queryBuilder = this.proRepo
+            .createQueryBuilder('professional')
+            .leftJoinAndSelect('professional.user', 'user')
+            .leftJoinAndSelect('professional.professionalServices', 'ps', 'ps.isActive = true')
+            .leftJoinAndSelect('ps.service', 'service')
+            .where('professional.isVisible = :visible', { visible: true })
+            .orderBy('professional.averageRating', 'DESC')
+            .addOrderBy('professional.reviewCount', 'DESC')
+            .take(limit)
+            .skip(offset);
+
+        const [data, total] = await queryBuilder.getManyAndCount();
+
+        return { data, total, limit, offset };
+    }
+
     async findOne(id: number) {
         const professional = await this.proRepo.findOne({
             where: { id },

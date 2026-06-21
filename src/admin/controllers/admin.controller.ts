@@ -4,6 +4,7 @@ import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { AdminService } from '../services/admin.service';
+import { ProfessionalsService } from '../../professionals/services/professionals.service';
 import { PaginationDto } from '../../common/dto/pagination.dto';
 import { ReviewCategoryRequestDto } from '../../services/dtos/category-request.dto';
 
@@ -13,7 +14,10 @@ import { ReviewCategoryRequestDto } from '../../services/dtos/category-request.d
 @Roles('admin')
 @ApiBearerAuth()
 export class AdminController {
-    constructor(private readonly adminService: AdminService) {}
+    constructor(
+        private readonly adminService: AdminService,
+        private readonly professionalsService: ProfessionalsService,
+    ) {}
 
     @Get('stats')
     @ApiOperation({ summary: 'Obtener estadísticas del dashboard' })
@@ -140,5 +144,23 @@ export class AdminController {
     @ApiOperation({ summary: 'Número de solicitudes de categoría pendientes' })
     getPendingCategoryRequestsCount() {
         return this.adminService.getPendingCategoryRequestsCount();
+    }
+
+    // ─── Professional Applications ────────────────────────────────────────────
+
+    @Get('professional-applications')
+    @ApiOperation({ summary: 'Listar solicitudes para convertirse en profesional' })
+    getProfessionalApplications(@Query('status') status?: 'pending' | 'approved' | 'rejected') {
+        return this.professionalsService.getApplications(status);
+    }
+
+    @Patch('professional-applications/:id/review')
+    @ApiOperation({ summary: 'Aprobar o rechazar solicitud de profesional' })
+    reviewProfessionalApplication(
+        @Param('id', ParseIntPipe) id: number,
+        @Body('status') status: 'approved' | 'rejected',
+        @Body('adminNotes') adminNotes: string,
+    ) {
+        return this.professionalsService.updateApplicationStatus(id, status, adminNotes);
     }
 }

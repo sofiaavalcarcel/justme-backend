@@ -11,7 +11,18 @@ import { User } from './src/users/entities/user.entity';
         const portfolioRepo = AppDataSource.getRepository(PortfolioImage);
         const userRepo = AppDataSource.getRepository(User);
         
-        const service = new ProfessionalsService(proRepo, portfolioRepo, userRepo, null as any);
+        const service = new ProfessionalsService(
+            proRepo,
+            portfolioRepo,
+            null as any,
+            userRepo,
+            null as any,
+            null as any,
+            null as any,
+            null as any,
+            AppDataSource as any,
+            null as any
+        );
         
         console.log('Testing matchByService...');
         const results = await service.matchByService({

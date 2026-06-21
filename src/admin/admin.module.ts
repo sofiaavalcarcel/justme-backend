@@ -11,11 +11,13 @@ import { AdminAiService } from './services/admin-ai.service';
 import { AdminController } from './controllers/admin.controller';
 import { AdminAiController } from './controllers/admin-ai.controller';
 import { BookingsModule } from '../bookings/bookings.module';
+import { ProfessionalsModule } from '../professionals/professionals.module';
 
 @Module({
     imports: [
         TypeOrmModule.forFeature([User, Professional, Booking, Transaction, Service, CategoryRequest]),
         BookingsModule,
+        ProfessionalsModule,
     ],
     controllers: [AdminController, AdminAiController],
     providers: [AdminService, AdminAiService],

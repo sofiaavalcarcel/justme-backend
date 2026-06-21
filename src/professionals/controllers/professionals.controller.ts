@@ -1,8 +1,8 @@
 import {
     Controller, Get, Post, Patch, Delete, Body, Param,
-    ParseIntPipe, Query, UseGuards, UploadedFile, UseInterceptors,
+    ParseIntPipe, Query, UseGuards, UploadedFile, UploadedFiles, UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
@@ -102,5 +102,28 @@ export class ProfessionalsController {
     @ApiOperation({ summary: 'Eliminar imagen del portafolio' })
     removePortfolioImage(@Param('imageId', ParseIntPipe) imageId: number) {
         return this.professionalsService.removePortfolioImage(imageId);
+    }
+
+    // --- Professional Applications ---
+    @Get('apply/status')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Obtener el estado de la solicitud para convertirse en profesional' })
+    async getApplicationStatus(@CurrentUser('id') userId: number) {
+        return this.professionalsService.getApplicationStatus(userId);
+    }
+
+    @Post('apply')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @UseInterceptors(FilesInterceptor('certifications', 3)) // Max 3 files
+    @ApiConsumes('multipart/form-data')
+    @ApiOperation({ summary: 'Aplicar para convertirse en profesional' })
+    async applyForProfessional(
+        @CurrentUser('id') userId: number,
+        @UploadedFiles() files: Express.Multer.File[],
+        @Body('reason') reason: string,
+    ) {
+        return this.professionalsService.submitApplication(userId, reason, files || []);
     }
 }

@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { Professional } from './entities/professional.entity';
 import { PortfolioImage } from './entities/portfolio-image.entity';
+import { ProfessionalApplication } from './entities/professional-application.entity';
 import { User } from '../users/entities/user.entity';
 import { ProfessionalsService } from './services/professionals.service';
 import { ProfessionalsController } from './controllers/professionals.controller';
@@ -12,6 +13,9 @@ import { CloudinaryService } from './services/cloudinary.service';
 import { MulterModule } from '@nestjs/platform-express';
 import * as multer from 'multer';
 import { ScheduleModule } from '../schedule/schedule.module';
+import { MailModule } from '../mail/mail.module';
+import { RolesModule } from '../roles/roles.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 // Entities from other modules needed for stats aggregation
 import { Booking } from '../bookings/entities/booking.entity';
@@ -26,6 +30,7 @@ import { IncentiveProgram } from '../coupons/entities/incentive-program.entity';
         TypeOrmModule.forFeature([
             Professional,
             PortfolioImage,
+            ProfessionalApplication,
             User,
             Booking,
             Review,
@@ -37,6 +42,9 @@ import { IncentiveProgram } from '../coupons/entities/incentive-program.entity';
         MulterModule.register({
             storage: multer.memoryStorage(),
         }),
+        MailModule,
+        RolesModule,
+        NotificationsModule,
     ],
     controllers: [ProfessionalsController, ProfessionalStatsController],
     providers: [ProfessionalsService, ProfessionalStatsService, CloudinaryService],

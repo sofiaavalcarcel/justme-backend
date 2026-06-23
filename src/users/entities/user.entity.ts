@@ -74,6 +74,15 @@ export class User {
     @Column({ type: 'boolean', default: false })
     isTwoFactorEnabled: boolean;
 
+    @Column({ type: 'date', nullable: true })
+    birthDate: Date;
+
+    @Column({ type: 'varchar', length: 255, nullable: true })
+    city: string;
+
+    @Column({ type: 'text', nullable: true })
+    bio: string;
+
     @CreateDateColumn()
     createdAt: Date;
 

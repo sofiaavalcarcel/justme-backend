@@ -10,11 +10,16 @@ import { TransformResponseInterceptor } from './common/interceptors/transform-re
 
 async function bootstrap() {
     const logger = new Logger('Bootstrap');
-    const app = await NestFactory.create(AppModule);
 
-    // 1. Get port from ConfigService (recommended way)
+    // Forzamos el uso de logs nativos desde el inicio para capturar fallos en Render
+    const app = await NestFactory.create(AppModule, {
+        logger: ['error', 'warn', 'log', 'debug'],
+    });
+
     const configService = app.get(ConfigService);
-    //const port = configService.get<number>('PORT') || 3000;
+
+    // Prioridad estricta al puerto asignado dinámicamente por Render
+    const port = process.env.PORT || configService.get<number>('config.port') || 3000;
 
     // 2. Security Middlewares
     // Temporarily disabled helmet to debug NotSameOrigin
@@ -72,10 +77,9 @@ async function bootstrap() {
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup('docs', app, document);
 
-    // 6. Start Application
-    await app.listen(process.env.PORT || 3000);
-    //logger.log(`🚀 Application is running on: http://localhost:${port}/api`);
-    //logger.log(`📖 Documentation available at: http://localhost:${port}/docs`);
+    // 6. Start Application - Escuchando en 0.0.0.0 requerido por entornos Cloud/Docker
+    await app.listen(port, '0.0.0.0');
+    logger.log(`🚀 Application is running on port: ${port}`);
 }
 
 bootstrap().catch((err) => {

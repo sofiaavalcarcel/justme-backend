@@ -80,6 +80,21 @@ export class CreateUserDto {
     @IsBoolean()
     @ApiPropertyOptional()
     readonly isTwoFactorEnabled?: boolean;
+
+    @IsOptional()
+    @IsString()
+    @ApiPropertyOptional()
+    readonly birthDate?: string;
+
+    @IsOptional()
+    @IsString()
+    @ApiPropertyOptional()
+    readonly city?: string;
+
+    @IsOptional()
+    @IsString()
+    @ApiPropertyOptional()
+    readonly bio?: string;
 }
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {}

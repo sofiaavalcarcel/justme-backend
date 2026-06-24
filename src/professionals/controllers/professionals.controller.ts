@@ -1,21 +1,25 @@
 import {
     Controller, Get, Post, Patch, Delete, Body, Param,
-    ParseIntPipe, Query, UseGuards, UploadedFile, UseInterceptors,
+    ParseIntPipe, Query, UseGuards, UploadedFile, UploadedFiles, UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ProfessionalsService } from '../services/professionals.service';
+import { CloudinaryService } from '../services/cloudinary.service';
 import { CreateProfessionalDto, UpdateProfessionalDto, NearbySearchDto, ServiceMatchDto } from '../dtos/professional.dto';
 import { SearchProfessionalsDto } from '../dtos/search-professionals.dto';
 
 @ApiTags('Profesionales')
 @Controller('professionals')
 export class ProfessionalsController {
-    constructor(private readonly professionalsService: ProfessionalsService) {}
+    constructor(
+        private readonly professionalsService: ProfessionalsService,
+        private readonly cloudinaryService: CloudinaryService,
+    ) {}
 
     @Get('nearby')
     @ApiOperation({ summary: 'Encontrar profesionales cerca de una ubicación' })
@@ -35,6 +39,18 @@ export class ProfessionalsController {
     @ApiOperation({ summary: 'Emparejar profesionales basados en un servicio y su radio de atención' })
     matchByService(@Query() query: ServiceMatchDto) {
         return this.professionalsService.matchByService(query);
+    }
+
+    @Get('top')
+    @ApiOperation({ summary: 'Top profesionales ordenados por calificación y reseñas' })
+    findTopRated(
+        @Query('limit') limit?: number,
+        @Query('offset') offset?: number,
+    ) {
+        return this.professionalsService.findTopRated(
+            limit ? Number(limit) : 10,
+            offset ? Number(offset) : 0,
+        );
     }
 
     @Get(':id')
@@ -76,7 +92,7 @@ export class ProfessionalsController {
         @UploadedFile() file: Express.Multer.File,
         @Body('caption') caption?: string,
     ) {
-        const imageUrl = `/uploads/portfolio/${file?.filename || 'default.jpg'}`;
+        const imageUrl = await this.cloudinaryService.uploadImage(file, 'justme_portfolio');
         return this.professionalsService.addPortfolioImage(id, imageUrl, caption);
     }
 
@@ -86,5 +102,28 @@ export class ProfessionalsController {
     @ApiOperation({ summary: 'Eliminar imagen del portafolio' })
     removePortfolioImage(@Param('imageId', ParseIntPipe) imageId: number) {
         return this.professionalsService.removePortfolioImage(imageId);
+    }
+
+    // --- Professional Applications ---
+    @Get('apply/status')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Obtener el estado de la solicitud para convertirse en profesional' })
+    async getApplicationStatus(@CurrentUser('id') userId: number) {
+        return this.professionalsService.getApplicationStatus(userId);
+    }
+
+    @Post('apply')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @UseInterceptors(FilesInterceptor('certifications', 3)) // Max 3 files
+    @ApiConsumes('multipart/form-data')
+    @ApiOperation({ summary: 'Aplicar para convertirse en profesional' })
+    async applyForProfessional(
+        @CurrentUser('id') userId: number,
+        @UploadedFiles() files: Express.Multer.File[],
+        @Body('reason') reason: string,
+    ) {
+        return this.professionalsService.submitApplication(userId, reason, files || []);
     }
 }

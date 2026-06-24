@@ -200,6 +200,66 @@ export class WalletService {
 
     // ─── Private helpers ───────────────────────────────────────────────────────
 
+    // ─── Incentive Bonus ──────────────────────────────────────────────────────
+
+    /**
+     * Credits the professional's wallet with an incentive bonus
+     * when they reach the monthly service target.
+     * Idempotent: uses a unique description per month to avoid duplicates.
+     */
+    async applyIncentiveBonus(
+        professionalId: number,
+        bonusAmount: number,
+        incentiveTitle: string,
+    ): Promise<{ bonusApplied: boolean; balanceAfter: number }> {
+        const wallet = await this.getOrCreateWallet(professionalId);
+
+        // Build a unique description per month to ensure idempotency
+        const now = new Date();
+        const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const description = `🎉 Bono "${incentiveTitle}" — ${monthKey}`;
+
+        // Skip if bonus was already applied this month
+        const existing = await this.transactionRepo.findOne({ where: { description } });
+        if (existing) {
+            return { bonusApplied: false, balanceAfter: Number(wallet.balance) };
+        }
+
+        const balanceBefore = Number(wallet.balance);
+        const balanceAfter  = balanceBefore + bonusAmount;
+
+        await this.transactionRepo.save(
+            this.transactionRepo.create({
+                walletId:     wallet.id,
+                type:         TransactionType.BONUS,
+                amount:       bonusAmount,
+                balanceBefore,
+                balanceAfter,
+                description,
+                status:       TransactionStatus.COMPLETED,
+            }),
+        );
+
+        wallet.balance = balanceAfter;
+        await this.walletRepo.save(wallet);
+
+        // Send congratulations notification
+        const pro = await this.professionalsService.findOne(professionalId).catch(() => null);
+        if (pro?.userId) {
+            await this.notificationsService.send(
+                pro.userId,
+                '🏆 ¡Felicidades! Bono desbloqueado',
+                `Has completado tu meta mensual "${incentiveTitle}". Se han acreditado $${bonusAmount.toLocaleString('es-CO')} COP a tu billetera.`,
+                NotificationType.WALLET,
+                { walletId: wallet.id },
+            );
+        }
+
+        return { bonusApplied: true, balanceAfter };
+    }
+
+    // ─── Private helpers ───────────────────────────────────────────────────────
+
     private async handlePostCommission(wallet: Wallet, professionalId: number) {
         const balance = Number(wallet.balance);
 

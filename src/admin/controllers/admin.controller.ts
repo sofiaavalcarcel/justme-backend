@@ -1,10 +1,12 @@
-import { Controller, Get, Patch, Put, Param, ParseIntPipe, Query, UseGuards, Body, DefaultValuePipe, ParseIntPipe as PIP } from '@nestjs/common';
+import { Controller, Get, Patch, Put, Param, ParseIntPipe, Query, UseGuards, Body, DefaultValuePipe, ParseIntPipe as PIP, Req } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { AdminService } from '../services/admin.service';
+import { ProfessionalsService } from '../../professionals/services/professionals.service';
 import { PaginationDto } from '../../common/dto/pagination.dto';
+import { ReviewCategoryRequestDto } from '../../services/dtos/category-request.dto';
 
 @ApiTags('Admin')
 @Controller('admin')
@@ -12,7 +14,10 @@ import { PaginationDto } from '../../common/dto/pagination.dto';
 @Roles('admin')
 @ApiBearerAuth()
 export class AdminController {
-    constructor(private readonly adminService: AdminService) {}
+    constructor(
+        private readonly adminService: AdminService,
+        private readonly professionalsService: ProfessionalsService,
+    ) {}
 
     @Get('stats')
     @ApiOperation({ summary: 'Obtener estadísticas del dashboard' })
@@ -115,5 +120,47 @@ export class AdminController {
         @Body('status') status: string,
     ) {
         return this.adminService.updateBookingStatus(id, status);
+    }
+
+    // ─── Category Requests ────────────────────────────────────────────────────
+
+    @Get('category-requests')
+    @ApiOperation({ summary: 'Listar solicitudes de nuevas categorías (filtrar por status)' })
+    getCategoryRequests(@Query('status') status?: string) {
+        return this.adminService.getCategoryRequests(status);
+    }
+
+    @Patch('category-requests/:id/review')
+    @ApiOperation({ summary: 'Aprobar o rechazar una solicitud de categoría' })
+    reviewCategoryRequest(
+        @Param('id', ParseIntPipe) id: number,
+        @Body() dto: ReviewCategoryRequestDto,
+        @Req() req: any,
+    ) {
+        return this.adminService.reviewCategoryRequest(id, dto, req.user?.id);
+    }
+
+    @Get('category-requests/pending-count')
+    @ApiOperation({ summary: 'Número de solicitudes de categoría pendientes' })
+    getPendingCategoryRequestsCount() {
+        return this.adminService.getPendingCategoryRequestsCount();
+    }
+
+    // ─── Professional Applications ────────────────────────────────────────────
+
+    @Get('professional-applications')
+    @ApiOperation({ summary: 'Listar solicitudes para convertirse en profesional' })
+    getProfessionalApplications(@Query('status') status?: 'pending' | 'approved' | 'rejected') {
+        return this.professionalsService.getApplications(status);
+    }
+
+    @Patch('professional-applications/:id/review')
+    @ApiOperation({ summary: 'Aprobar o rechazar solicitud de profesional' })
+    reviewProfessionalApplication(
+        @Param('id', ParseIntPipe) id: number,
+        @Body('status') status: 'approved' | 'rejected',
+        @Body('adminNotes') adminNotes: string,
+    ) {
+        return this.professionalsService.updateApplicationStatus(id, status, adminNotes);
     }
 }

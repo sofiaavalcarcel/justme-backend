@@ -5,16 +5,19 @@ import { Professional } from '../professionals/entities/professional.entity';
 import { Booking } from '../bookings/entities/booking.entity';
 import { Transaction } from '../wallet/entities/transaction.entity';
 import { Service } from '../services/entities/service.entity';
+import { CategoryRequest } from '../services/entities/category-request.entity';
 import { AdminService } from './services/admin.service';
 import { AdminAiService } from './services/admin-ai.service';
 import { AdminController } from './controllers/admin.controller';
 import { AdminAiController } from './controllers/admin-ai.controller';
 import { BookingsModule } from '../bookings/bookings.module';
+import { ProfessionalsModule } from '../professionals/professionals.module';
 
 @Module({
     imports: [
-        TypeOrmModule.forFeature([User, Professional, Booking, Transaction, Service]),
+        TypeOrmModule.forFeature([User, Professional, Booking, Transaction, Service, CategoryRequest]),
         BookingsModule,
+        ProfessionalsModule,
     ],
     controllers: [AdminController, AdminAiController],
     providers: [AdminService, AdminAiService],

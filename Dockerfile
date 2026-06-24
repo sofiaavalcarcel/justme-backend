@@ -14,12 +14,10 @@ FROM node:20-alpine AS production
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm ci --omit=dev && npm install ts-node tsconfig-paths
+RUN npm ci --omit=dev
 
 COPY --from=build /app/dist ./dist
 
 EXPOSE 3000
 
-CMD ["sh", "-c", "npm run migration:run && node dist/main.js"]
-# command: sh -c "npm run migration:run:stg && node dist/main.js"
-# CMD ["node", "dist/main.js"]
+CMD ["sh", "-c", "npm run migration:run && npm run start:prod"]

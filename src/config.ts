@@ -31,5 +31,25 @@ export default registerAs('config', () => {
             secretKey: process.env.STRIPE_SECRET_KEY || '',
             webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
         },
+        redis: {
+            url: process.env.REDIS_URL || '',
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379', 10),
+        },
+        mail: {
+            host: process.env.MAIL_HOST || '',
+            user: process.env.MAIL_USER || '',
+            password: process.env.MAIL_PASSWORD || '',
+            from: process.env.MAIL_FROM || '',
+        },
+        cloudinary: {
+            cloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
+            apiKey: process.env.CLOUDINARY_API_KEY || '',
+            apiSecret: process.env.CLOUDINARY_API_SECRET || '',
+        },
+        ollama: {
+            url: process.env.OLLAMA_URL || '',
+            model: process.env.OLLAMA_MODEL || '',
+        },
     };
 });

@@ -9,6 +9,11 @@ export class AppController {
     private readonly configService: ConfigService
   ) {}
 
+  @Get()
+  healthCheck() {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  }
+
   // @Get()
   // getHello(): string {
   //   const myVar = this.configService.get<string>('NODE_ENV');

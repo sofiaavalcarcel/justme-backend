@@ -12,19 +12,21 @@ export class RedisCacheService implements OnModuleInit, OnModuleDestroy {
   constructor(private readonly config: ConfigService) {}
 
   onModuleInit() {
-    const host = this.config.get<string>('REDIS_HOST') || 'localhost';
-    const port = this.config.get<number>('REDIS_PORT') || 6379;
-    
-    this.client = new Redis({
-      host,
-      port,
+    const redisUrl = this.config.get<string>('config.redis.url');
+    const host = this.config.get<string>('config.redis.host') || 'localhost';
+    const port = this.config.get<number>('config.redis.port') || 6379;
+
+    const redisOptions = {
       maxRetriesPerRequest: 1,
-      retryStrategy: (times) => {
-        // Stop retrying after the first failed attempt to prevent log spam
+      retryStrategy: (times: number) => {
         if (times > 1) return null;
         return 2000;
       },
-    });
+    };
+
+    this.client = redisUrl
+      ? new Redis(redisUrl, redisOptions)
+      : new Redis({ host, port, ...redisOptions });
 
     this.client.on('error', (err) => {
       this.isConnected = false;

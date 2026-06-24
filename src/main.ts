@@ -14,7 +14,7 @@ async function bootstrap() {
 
     // 1. Get port from ConfigService (recommended way)
     const configService = app.get(ConfigService);
-    const port = configService.get<number>('PORT') || 3000;
+    //const port = configService.get<number>('PORT') || 3000;
 
     // 2. Security Middlewares
     // Temporarily disabled helmet to debug NotSameOrigin
@@ -73,9 +73,9 @@ async function bootstrap() {
     SwaggerModule.setup('docs', app, document);
 
     // 6. Start Application
-    await app.listen(port);
-    logger.log(`🚀 Application is running on: http://localhost:${port}/api`);
-    logger.log(`📖 Documentation available at: http://localhost:${port}/docs`);
+    await app.listen(process.env.PORT || 3000);
+    //logger.log(`🚀 Application is running on: http://localhost:${port}/api`);
+    //logger.log(`📖 Documentation available at: http://localhost:${port}/docs`);
 }
 
 bootstrap().catch((err) => {

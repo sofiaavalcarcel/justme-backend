@@ -1,21 +1,33 @@
 import { Injectable, NotFoundException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { Professional } from '../entities/professional.entity';
 import { PortfolioImage } from '../entities/portfolio-image.entity';
 import { User } from '../../users/entities/user.entity';
+import { Wallet } from '../../wallet/entities/wallet.entity';
+import { RolesService } from '../../roles/services/roles.service';
 import { CreateProfessionalDto, UpdateProfessionalDto, NearbySearchDto, ServiceMatchDto } from '../dtos/professional.dto';
 import { SearchProfessionalsDto } from '../dtos/search-professionals.dto';
 import { ScheduleService } from '../../schedule/services/schedule.service';
+import { ProfessionalApplication } from '../entities/professional-application.entity';
+import { CloudinaryService } from './cloudinary.service';
+import { MailService } from '../../mail/mail.service';
+import { NotificationsService } from '../../notifications/services/notifications.service';
 
 @Injectable()
 export class ProfessionalsService {
     constructor(
         @InjectRepository(Professional) private proRepo: Repository<Professional>,
         @InjectRepository(PortfolioImage) private portfolioRepo: Repository<PortfolioImage>,
+        @InjectRepository(ProfessionalApplication) private appRepo: Repository<ProfessionalApplication>,
         @InjectRepository(User) private userRepo: Repository<User>,
         @Inject(forwardRef(() => ScheduleService))
         private scheduleService: ScheduleService,
+        private cloudinaryService: CloudinaryService,
+        private mailService: MailService,
+        private rolesService: RolesService,
+        private dataSource: DataSource,
+        private notificationsService: NotificationsService,
     ) {}
 
     async findNearby(dto: NearbySearchDto) {
@@ -25,7 +37,7 @@ export class ProfessionalsService {
             .createQueryBuilder('professional')
             .leftJoinAndSelect('professional.user', 'user')
             .leftJoinAndSelect('professional.schedules', 'schedules')
-            .leftJoinAndSelect('professional.professionalServices', 'ps')
+            .leftJoinAndSelect('professional.professionalServices', 'ps', 'ps.isActive = true')
             .leftJoinAndSelect('ps.service', 'service')
             .where('professional.isVisible = :visible', { visible: true })
             .andWhere('professional.latitude IS NOT NULL')
@@ -37,9 +49,11 @@ export class ProfessionalsService {
             );
 
         if (dto.service) {
-            query = query.andWhere('service.name ILIKE :serviceName', {
-                serviceName: `%${dto.service}%`,
-            });
+            // Filtra por nombre o categoría global — sin usar ps.name (ya no existe)
+            query = query.andWhere(
+                '(service.name ILIKE :serviceName OR service.category ILIKE :serviceName)',
+                { serviceName: `%${dto.service}%` }
+            );
         }
 
         if (dto.date && dto.time) {
@@ -117,9 +131,22 @@ export class ProfessionalsService {
 
         const { entities, raw } = await query.getRawAndEntities();
 
-        return entities.map((pro, i) => ({
+        // DISTINCT manual: eliminar duplicados por id de profesional
+        // (puede haber filas duplicadas si el profesional tiene varias categorías activas)
+        const seen = new Set<number>();
+        const unique: typeof entities = [];
+        const uniqueRaw: typeof raw = [];
+        entities.forEach((pro, i) => {
+            if (!seen.has(pro.id)) {
+                seen.add(pro.id);
+                unique.push(pro);
+                uniqueRaw.push(raw[i]);
+            }
+        });
+
+        return unique.map((pro, i) => ({
             ...pro,
-            distance: parseFloat(parseFloat(raw[i]?.distance_km || '0').toFixed(1)),
+            distance: parseFloat(parseFloat(uniqueRaw[i]?.distance_km || '0').toFixed(1)),
         }));
     }
 
@@ -244,12 +271,16 @@ export class ProfessionalsService {
 
         const queryBuilder = this.proRepo.createQueryBuilder('pro')
             .leftJoinAndSelect('pro.user', 'user')
-            .leftJoinAndSelect('pro.professionalServices', 'ps')
+            .leftJoinAndSelect('pro.professionalServices', 'ps', 'ps.isActive = true')
             .leftJoinAndSelect('ps.service', 'service')
             .where('pro.isVisible = :visible', { visible: true });
 
         if (sector) {
-            queryBuilder.andWhere('service.name ILIKE :sector', { sector: `%${sector}%` });
+            // Filtra por categoría global (service.name o service.category)
+            queryBuilder.andWhere(
+                '(service.name ILIKE :sector OR service.category ILIKE :sector)',
+                { sector: `%${sector}%` }
+            );
         }
 
         queryBuilder.andWhere(
@@ -277,6 +308,27 @@ export class ProfessionalsService {
         return { data, total, limit, offset };
     }
 
+    /**
+     * Returns all visible professionals sorted by rating (DESC) then reviewCount (DESC).
+     * Used by the home screen "Top Professionals" and the "All Professionals" screen.
+     */
+    async findTopRated(limit = 10, offset = 0) {
+        const queryBuilder = this.proRepo
+            .createQueryBuilder('professional')
+            .leftJoinAndSelect('professional.user', 'user')
+            .leftJoinAndSelect('professional.professionalServices', 'ps', 'ps.isActive = true')
+            .leftJoinAndSelect('ps.service', 'service')
+            .where('professional.isVisible = :visible', { visible: true })
+            .orderBy('professional.averageRating', 'DESC')
+            .addOrderBy('professional.reviewCount', 'DESC')
+            .take(limit)
+            .skip(offset);
+
+        const [data, total] = await queryBuilder.getManyAndCount();
+
+        return { data, total, limit, offset };
+    }
+
     async findOne(id: number) {
         const professional = await this.proRepo.findOne({
             where: { id },
@@ -294,14 +346,21 @@ export class ProfessionalsService {
         if (!professional) {
             throw new NotFoundException(`Professional #${id} not found`);
         }
+        if (professional.professionalServices) {
+            professional.professionalServices = professional.professionalServices.filter(ps => ps.isActive);
+        }
         return professional;
     }
 
     async findByUserId(userId: number) {
-        return this.proRepo.findOne({
+        const professional = await this.proRepo.findOne({
             where: { userId },
             relations: ['professionalServices', 'professionalServices.service', 'portfolioImages'],
         });
+        if (professional && professional.professionalServices) {
+            professional.professionalServices = professional.professionalServices.filter(ps => ps.isActive);
+        }
+        return professional;
     }
 
     async create(userId: number, dto: CreateProfessionalDto) {
@@ -422,6 +481,117 @@ export class ProfessionalsService {
 
     async setVisibility(professionalId: number, visible: boolean) {
         await this.proRepo.update(professionalId, { isVisible: visible });
+    }
+
+    // --- Professional Applications ---
+    async submitApplication(userId: number, reason: string, files: Express.Multer.File[]) {
+        const existing = await this.appRepo.findOne({ where: { userId, status: 'pending' } });
+        if (existing) {
+            throw new Error('Ya tienes una solicitud en proceso.');
+        }
+
+        const certifications: string[] = [];
+        for (const file of files) {
+            const url = await this.cloudinaryService.uploadImage(file, 'justme_certifications');
+            certifications.push(url);
+        }
+
+        const app = this.appRepo.create({
+            userId,
+            reason,
+            certifications,
+            status: 'pending'
+        });
+
+        return this.appRepo.save(app);
+    }
+
+    async getApplications(status?: 'pending' | 'approved' | 'rejected') {
+        const query = this.appRepo.createQueryBuilder('app')
+            .leftJoinAndSelect('app.user', 'user')
+            .orderBy('app.createdAt', 'DESC');
+        
+        if (status) {
+            query.where('app.status = :status', { status });
+        }
+
+        return query.getMany();
+    }
+
+    async getApplicationStatus(userId: number) {
+        const app = await this.appRepo.findOne({
+            where: { userId },
+            order: { createdAt: 'DESC' }
+        });
+        if (!app) return { status: 'none' };
+        return {
+            status: app.status,
+            rejectionReason: app.adminNotes,
+            appliedAt: app.createdAt,
+            reviewedAt: app.updatedAt
+        };
+    }
+
+    async updateApplicationStatus(id: number, status: 'approved' | 'rejected', adminNotes: string) {
+        const app = await this.appRepo.findOne({ where: { id }, relations: ['user'] });
+        if (!app) throw new NotFoundException('Solicitud no encontrada');
+
+        app.status = status;
+        app.adminNotes = adminNotes;
+        await this.appRepo.save(app);
+
+        if (status === 'approved') {
+            // Assign professional role and create Professional and Wallet entities
+            let role = await this.rolesService.findByName('professional');
+            if (!role) {
+                role = await this.rolesService.createSimple('professional');
+            }
+
+            const user = await this.userRepo.findOne({ where: { id: app.userId }, relations: ['roles'] });
+            if (user && !user.roles.some(r => r.name === 'professional')) {
+                user.roles.push(role);
+                await this.userRepo.save(user);
+
+                const manager = this.dataSource.manager;
+                const proRepo = manager.getRepository(Professional);
+                const walletRepo = manager.getRepository(Wallet);
+
+                let pro = await proRepo.findOne({ where: { userId: user.id } });
+                if (!pro) {
+                    pro = proRepo.create({
+                        userId: user.id,
+                        verified: true, // Verified by default since it was manually approved
+                        isVisible: true,
+                    });
+                    const savedPro = await proRepo.save(pro);
+
+                    let wallet = await walletRepo.findOne({ where: { professionalId: savedPro.id } });
+                    if (!wallet) {
+                        await walletRepo.save(
+                            walletRepo.create({ professionalId: savedPro.id, balance: 0, currency: 'COP' }),
+                        );
+                    }
+                }
+            }
+        }
+
+        // Send Email Notification
+        await this.mailService.sendApplicationResult(
+            { name: app.user.name, email: app.user.email },
+            status,
+            adminNotes
+        );
+
+        // Send In-App Notification
+        await this.notificationsService.send(
+            app.userId,
+            status === 'approved' ? '¡Felicidades! Solicitud Aprobada' : 'Actualización de Solicitud',
+            status === 'approved' 
+                ? 'Tu solicitud para ser profesional ha sido aprobada. Ya puedes configurar tus servicios.'
+                : 'Tu solicitud para ser profesional ha sido rechazada. Revisa tu correo para más detalles.'
+        );
+
+        return app;
     }
 
     private calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {

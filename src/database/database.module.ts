@@ -12,13 +12,16 @@ import config from '../config';
                 const { user, host, name, password, port } = configType.dataBase;
                 return {
                     type: 'postgres',
-                    host,
-                    port,
-                    username: user,
-                    password,
-                    database: name,
+
+                    url: process.env.DATABASE_URL,
+
                     synchronize: false,
+
                     autoLoadEntities: true,
+
+                    ssl: {
+                        rejectUnauthorized: false,
+                    },
                 };
             },
         }),

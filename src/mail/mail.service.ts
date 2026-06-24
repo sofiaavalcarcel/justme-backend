@@ -17,4 +17,20 @@ export class MailService {
             },
         });
     }
+
+    async sendApplicationResult(user: { name: string; email: string }, status: 'approved' | 'rejected', adminMessage: string) {
+        await this.mailerService.sendMail({
+            to: user.email,
+            subject: status === 'approved'
+                ? '🎉 ¡Bienvenido a JustMe! Tu solicitud ha sido aprobada'
+                : '📄 Actualización sobre tu solicitud en JustMe',
+            template: 'application-result',
+            context: {
+                name: user.name,
+                isApproved: status === 'approved',
+                adminMessage,
+                year: new Date().getFullYear(),
+            },
+        });
+    }
 }

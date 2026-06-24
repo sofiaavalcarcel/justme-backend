@@ -1,19 +1,21 @@
 import {
     Controller, Get, Post, Patch, Delete, Body, Param,
-    ParseIntPipe, UseGuards,
+    ParseIntPipe, UseGuards, Req,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/auth.guard';
 import { ServicesService } from '../services/services.service';
 import { CreateServiceDto, UpdateServiceDto } from '../dtos/service.dto';
 import { CreateProfessionalServiceDto, UpdateProfessionalServiceDto } from '../dtos/professional-service.dto';
+import { CreateCategoryRequestDto } from '../dtos/category-request.dto';
 
 @ApiTags('Servicios')
 @Controller('services')
 export class ServicesController {
     constructor(private readonly servicesService: ServicesService) {}
 
-    // Service Categories
+    // ─── Service Categories ───────────────────────────────────────────────────
+
     @Get('categories')
     @ApiOperation({ summary: 'Obtener todas las categorías de servicios' })
     findAllCategories() {
@@ -42,7 +44,8 @@ export class ServicesController {
         return this.servicesService.updateCategory(id, dto);
     }
 
-    // Professional Services
+    // ─── Professional Services ────────────────────────────────────────────────
+
     @Get('professional/:professionalId')
     @ApiOperation({ summary: 'Obtener servicios ofrecidos por un profesional' })
     findProfessionalServices(@Param('professionalId', ParseIntPipe) professionalId: number) {
@@ -77,5 +80,26 @@ export class ServicesController {
     @ApiOperation({ summary: 'Eliminar listado de servicio del profesional' })
     removeProfessionalService(@Param('id', ParseIntPipe) id: number) {
         return this.servicesService.removeProfessionalService(id);
+    }
+
+    // ─── Solicitudes de nuevas categorías (profesional) ──────────────────────
+
+    @Post('category-requests')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Solicitar una nueva categoría de servicio al admin' })
+    createCategoryRequest(@Req() req: any, @Body() dto: CreateCategoryRequestDto) {
+        // professionalId viene del JWT payload → req.user.professionalId
+        const professionalId: number = req.user?.professionalId ?? req.user?.id;
+        return this.servicesService.createCategoryRequest(professionalId, dto);
+    }
+
+    @Get('category-requests/mine')
+    @UseGuards(JwtAuthGuard)
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Ver mis solicitudes de categoría' })
+    getMyCategoryRequests(@Req() req: any) {
+        const professionalId: number = req.user?.professionalId ?? req.user?.id;
+        return this.servicesService.findProfessionalCategoryRequests(professionalId);
     }
 }

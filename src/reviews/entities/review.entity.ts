@@ -3,6 +3,7 @@ import {
     CreateDateColumn,
     Entity,
     ManyToOne,
+    OneToOne,
     JoinColumn,
     PrimaryGeneratedColumn,
 } from 'typeorm';
@@ -29,6 +30,10 @@ export class Review {
 
     @Column({ nullable: true })
     bookingId: number;
+
+    @OneToOne('Booking', { nullable: true })
+    @JoinColumn({ name: 'bookingId' })
+    booking: any;
 
     @Column({ type: 'decimal', precision: 2, scale: 1 })
     rating: number;
